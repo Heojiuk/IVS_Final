@@ -26,16 +26,19 @@ ALL_TOPICS = [
 
 class MessageBus:
     def __init__(self):
+        """버스 생성 — 정의된 토픽마다 빈(None) 슬롯을 만든다.  파라미터 없음"""
         self._lock = threading.Lock()
         self._data = {t: None for t in ALL_TOPICS}   # 정의된 토픽 슬롯만 생성
 
     def publish(self, topic, data):
+        """토픽 슬롯에 최신값을 덮어쓴다(미정의 토픽이면 KeyError).  topic=토픽명(Topics 상수), data=그 토픽의 dataclass"""
         if topic not in self._data:
             raise KeyError(f"미정의 토픽: {topic}")    # 스키마 계약 (DD-INF-01)
         with self._lock:
             self._data[topic] = data                  # 최신값 덮어쓰기
 
     def read(self, topic):
+        """토픽의 최신값을 반환한다(아직 없으면 None, 미정의 토픽이면 KeyError).  topic=토픽명(Topics 상수)"""
         if topic not in self._data:
             raise KeyError(f"미정의 토픽: {topic}")
         with self._lock:

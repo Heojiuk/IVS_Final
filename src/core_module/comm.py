@@ -14,8 +14,8 @@ import hashlib
 import threading
 import time
 
-import config
-from bus import Topics
+from core_module import config
+from core_module.bus import Topics
 from contracts import V2VState, LinkStatus, LinkState, Role, DriveBehavior
 
 # ── STATE 패킷 코덱 ───────────────────────────────────────────────────
@@ -25,15 +25,17 @@ PACKET_LEN = _HDR + 32              # 54
 _VER, _STATE = 1, 1
 
 
-def pack_state(ego, role, seq, key):
-    """EgoState(throttle_pwm·steer_pwm·behavior) → 54B STATE 패킷."""
+def packet_generator(ego, role, seq, key):
+    """EgoState를 54B STATE 패킷(bytes)으로 직렬화한다(본문 + HMAC).
+    ego=자차상태(throttle_pwm·steer_pwm·behavior), role=송신차량(Role 1선행/2후행), seq=일련번호(0~65535), key=HMAC PSK"""
     body = struct.pack(_FMT, _VER, _STATE, int(role), seq & 0xFFFF,
                        ego.stamp, ego.throttle_pwm, ego.steer_pwm, int(ego.behavior))
     return body + hmac.new(key, body, hashlib.sha256).digest()
 
 
-def unpack_state(pkt, key):
-    """54B 패킷 → V2VState. 길이/HMAC/버전 불일치 시 ValueError(폐기)."""
+def packet_parser(pkt, key):
+    """수신 54B 패킷을 검증·역직렬화해 V2VState로 만든다. 길이/HMAC/버전 불일치 시 ValueError(폐기).
+    pkt=수신 바이트열(54B), key=HMAC PSK(송신측과 동일)"""
     if len(pkt) != PACKET_LEN:
         raise ValueError(f"길이 오류 {len(pkt)}≠{PACKET_LEN}")
     body, mac = pkt[:_HDR], pkt[_HDR:]
@@ -49,6 +51,7 @@ def unpack_state(pkt, key):
 # ── 통신 모듈 ─────────────────────────────────────────────────────────
 class CommModule:
     def __init__(self, role):
+        """통신 모듈 초기화 — 역할별 포트로 송수신 소켓을 열고 RX 스레드를 준비한다.  role='leader'|'follower'(자차 역할)"""
         cfg = config.for_role(role)
         self._role = Role.LEADER if role == "leader" else Role.FOLLOWER
         self._key = config.load_key()
@@ -69,24 +72,26 @@ class CommModule:
 
     # 스케줄러 호출 — 송신(TX)
     def step(self, bus):
+        """매 50ms 호출 — 자차 EgoState를 STATE 패킷으로 송신하고 link_status를 갱신한다.  bus=메시지버스"""
         ego = bus.read(Topics.EGO_STATE)               # 입력 IF-B4 (throttle_pwm·steer_pwm·behavior)
         if ego is not None:
             self._seq = (self._seq + 1) & 0xFFFF
             try:
-                self._tx.sendto(pack_state(ego, self._role, self._seq, self._key), self._peer)
+                self._tx.sendto(packet_generator(ego, self._role, self._seq, self._key), self._peer)
             except OSError:
                 pass                                   # TODO: 송신 실패 카운트/경보
         bus.publish(Topics.LINK_STATUS, self._link_status())   # IF-B6
 
     # 별도 스레드 — 수신(RX), 비동기
     def _rx_loop(self):
+        """수신 스레드 루프 — 상대 STATE를 받아 검증·디코드 후 버스에 V2VState·link_status를 기록한다.  파라미터 없음"""
         while not self._stop.is_set():
             try:
                 data, _addr = self._rx.recvfrom(256)
             except socket.timeout:
                 continue
             try:
-                state = unpack_state(data, self._key)
+                state = packet_parser(data, self._key)
             except ValueError:
                 continue                               # 위변조/길이 오류 폐기
             now = time.monotonic()
@@ -97,6 +102,7 @@ class CommModule:
             self._bus.publish(Topics.LINK_STATUS, self._link_status())  # IF-B6
 
     def _link_status(self):
+        """마지막 수신 경과시간으로 링크 상태(ALIVE/STALE/LOST)를 판정해 LinkStatus를 반환한다.  파라미터 없음"""
         now = time.monotonic()
         if self._last_rx is None:
             return LinkStatus(stamp=now, state=LinkState.LOST, age_rx=9999.0, last_seq=self._rx_seq)
@@ -111,10 +117,12 @@ class CommModule:
 
     # 생명주기 (main 이 호출, 스케줄러 아님)
     def start(self, bus):
+        """RX 스레드를 기동한다 (main 이 1회 호출).  bus=수신 결과를 기록할 메시지버스"""
         self._bus = bus
         self._thread.start()
 
     def stop(self):
+        """RX 스레드를 멈추고 송수신 소켓을 닫는다 (종료 시 1회).  파라미터 없음"""
         self._stop.set()
         self._tx.close()
         self._rx.close()

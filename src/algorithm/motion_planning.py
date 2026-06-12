@@ -9,7 +9,7 @@
 """
 import time
 
-from bus import Topics
+from core_module.bus import Topics
 from contracts import EgoState, DriveBehavior
 
 # 액추에이터 (gpiozero PWM, 피드백 없음. 핀: ICD IF-H3/H4·HWD 기준)
@@ -22,13 +22,20 @@ MOTOR_FORWARD, MOTOR_BACKWARD, MOTOR_ENABLE = 5, 6, 13  # IF-H4 IN1=5·IN2=6·EN
 
 class MotionModule:
     def __init__(self, role):
+        """주행 모듈 초기화.  role=자차 역할(Role) — 후행(FOLLOWER)만 초음파 거리 보정"""
         self.role = role          # 후행(FOLLOWER)만 초음파 거리 보정
 
     def step(self, bus):
-        cmd = bus.read(Topics.COMMAND)                 # IF-B2 (behavior)
-        scene = bus.read(Topics.SCENE)                 # IF-B1
-        leader = bus.read(Topics.LEADER_STATE)         # IF-B5
+        """매 50ms 호출 — command대로 throttle_pwm·steer_pwm을 산출해 GPIO 출력하고 ego_state를 발행한다.  bus=메시지버스"""
+        cmd = bus.read(Topics.COMMAND)                 # 입력 IF-B2 (behavior)
+        scene = bus.read(Topics.SCENE)                 # 입력 IF-B1
+        leader = bus.read(Topics.LEADER_STATE)         # 입력 IF-B5
         behavior = cmd.behavior if cmd is not None else DriveBehavior.FOLLOW
-        # TODO(모션팀): 행동대로 throttle_pwm·steer_pwm 산출 → GPIO 출력
-        bus.publish(Topics.EGO_STATE,
-                    EgoState(stamp=time.monotonic(), behavior=behavior))   # 출력 IF-B4
+
+        # ===== ★ 모션팀 여기 작업 =====================================
+        # TODO: behavior 에 맞춰 throttle_pwm(종방향)·steer_pwm(횡방향) 을 산출하고
+        #       서보(SERVO_PIN)·DC모터(MOTOR_*) GPIO 로 출력하세요. (제어 2원칙)
+        ego = EgoState(stamp=time.monotonic(), behavior=behavior)   # ← 지금은 더미값(PWM 0)
+        # ==============================================================
+
+        bus.publish(Topics.EGO_STATE, ego)             # 출력 IF-B4 (토픽·형식 고정 — 건드리지 말 것)

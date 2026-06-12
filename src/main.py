@@ -7,18 +7,18 @@
 import argparse
 import signal
 
-import config
-from bus import MessageBus
+from core_module import config
+from core_module.bus import MessageBus
+from core_module.scheduler import Scheduler
 from contracts import Role
-from scheduler import Scheduler
-from perception import PerceptionModule
-from decision import DecisionModule
-from motion import MotionModule
-from comm import CommModule
+from algorithm.perception import PerceptionModule
+from algorithm.decision import DecisionModule
+from algorithm.motion_planning import MotionModule
+from core_module.comm import CommModule
 
 
 def build(role):
-    """버스 1개 + 모듈 4개 조립. 스케줄러는 modules 순서대로 step() 호출."""
+    """버스 1개 + 모듈 4개(인지·판단·주행·통신)를 조립해 (bus, modules, comm)을 반환한다.  role='leader'|'follower'"""
     role = role.lower()
     role_id = Role.LEADER if role == "leader" else Role.FOLLOWER
     bus = MessageBus()
@@ -33,6 +33,7 @@ def build(role):
 
 
 def main():
+    """진입점 — --role 파싱·조립·RX 기동 후 스케줄러를 돌린다(Ctrl+C까지).  파라미터 없음 (CLI: --role leader|follower)"""
     ap = argparse.ArgumentParser(description="IVS V2V 군집주행 노드")
     ap.add_argument("--role", choices=["leader", "follower"], default="leader")
     args = ap.parse_args()

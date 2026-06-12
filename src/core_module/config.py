@@ -15,7 +15,7 @@ _ROLES = {
 
 
 def for_role(role: str) -> dict:
-    """역할 설정 사본. 로컬 테스트는 IVS_PEER_IP=127.0.0.1 로 단일 PC 2프로세스 통신."""
+    """역할별 포트·상대IP 설정 사본을 반환한다(로컬 테스트는 IVS_PEER_IP=127.0.0.1 로 단일 PC 2프로세스).  role='leader'|'follower'"""
     if role not in _ROLES:
         raise ValueError(f"미지원 역할: {role} (leader|follower)")
     cfg = dict(_ROLES[role])
@@ -24,7 +24,7 @@ def for_role(role: str) -> dict:
 
 
 def load_key() -> bytes:
-    """HMAC 사전공유키. src/psk.key 있으면 사용, 없으면 개발용 기본키.
+    """HMAC 사전공유키(32B)를 반환한다 — src/psk.key 있으면 사용, 없으면 개발용 기본키.  파라미터 없음
 
     운영 전 psk.key 를 각 차량에 동일하게 배포(형상관리 제외 — .gitignore).
     """
