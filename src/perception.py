@@ -8,6 +8,9 @@ import time
 from bus import Topics
 from contracts import Scene
 
+# 센서 핀 (ICD IF-H2 / HWD)
+ULTRASONIC_TRIG, ULTRASONIC_ECHO = 23, 24   # 전방 초음파 (ECHO 5V→3.3V 분압)
+
 
 class PerceptionModule:
     def step(self, bus):

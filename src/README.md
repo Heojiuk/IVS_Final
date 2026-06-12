@@ -8,8 +8,8 @@
 |---|---|---|---|
 | 통신/인프라 | 1 | `comm.py` `bus.py` `scheduler.py` `config.py` `main.py` | V2V 송수신·버스·루프 (80% 완성) |
 | 인지 | 2 | `perception.py` | 카메라(차선·YOLO)+초음파 → `scene` |
-| 판단 | 1 | `decision.py` | scene·V2V → `maneuver`·`mode` |
-| 모션 | 2 | `motion.py` | maneuver → 제어·구동(GPIO), `ego_state` |
+| 판단 | 1 | `decision.py` | scene·V2V → `command`·`mode` |
+| 모션 | 2 | `motion.py` | command → 제어·구동(GPIO), `ego_state` |
 | (공용) | 6 | `contracts.py` | 토픽 데이터 형식 — **모두가 보고, writer만 고침** |
 
 - `contracts.py` 가 6명의 공통 약속(필드·타입·단위). 여기 정의된 dataclass만 버스로 주고받는다.
@@ -29,9 +29,9 @@ main은 조립 후 스케줄러만 부르고, 스케줄러가 매 50ms 모듈 st
 
 ## 버스 구조 (모듈 간 직접 호출 금지, 버스만 경유)
 ```
-perception ──scene──▶ decision ──maneuver──▶ motion ──ego_state──▶ comm
-                         ▲                      ▲                    │
-                         └── link_status ───────┴── leader_state ────┘
+perception ──scene──▶ decision ──command──▶ motion ──ego_state──▶ comm
+                         ▲                     ▲                    │
+                         └── link_status ──────┴── leader_state ────┘
                                        (comm RX 스레드가 버스에 기록)
 ```
 - 쓰기: `bus.publish(Topics.X, data)`   읽기: `bus.read(Topics.X)`
@@ -41,7 +41,7 @@ perception ──scene──▶ decision ──maneuver──▶ motion ──eg
 | 토픽 | ICD | Writer → Reader |
 |---|---|---|
 | `perception/scene` | IF-B1 | 인지 → 판단·주행 |
-| `decision/maneuver` | IF-B2 | 판단 → 주행·통신 |
+| `decision/command` | IF-B2 | 판단 → 주행·통신 (behavior+target_lane) |
 | `decision/mode` | IF-B3 | 판단 → 전 모듈 |
 | `motion/ego_state` | IF-B4 | 주행 → 통신 |
 | `v2v/leader_state` | IF-B5 | 통신 → 판단·주행 (후행 버스) |
@@ -61,8 +61,8 @@ python test_comm.py                 # STATE 코덱 왕복·위변조 테스트
 **S-1 군집 형성·지속 주행** — 차선 따라 자율주행
 ```
 인지  차선 인식                ─scene→
-판단  기동=순항                ─maneuver, mode→
-주행  경로·Pure Pursuit·구동    ─ego_state→ (GPIO/PWM)
+판단  행동=추종                ─command, mode→
+주행  Pure Pursuit·구동 PWM    ─ego_state→ (GPIO/PWM)
 통신  STATE 송신
 ```
 
@@ -70,35 +70,35 @@ python test_comm.py                 # STATE 코덱 왕복·위변조 테스트
 ```
 [rx]  V2V 수신                ─leader_state, link_status→ (버스 기록, 비동기)
 인지  차선 인식                ─scene→
-판단  read leader·link         ─maneuver(추종)→
-주행  CACC 거리 폐루프(초음파)   ─ego_state→
+판단  read leader·link         ─command(행동=추종)→
+주행  초음파 거리 보정(듀티)     ─ego_state→
 통신  STATE 송신
 ```
 
 **S-3 전방 장애물 회피·정지**
 ```
 인지  YOLO+초음파 융합          ─scene(front_clear=false, objects)→
-판단  회피/정지 + 추돌가드      ─maneuver→
+판단  회피/정지 + 추돌가드      ─command→
 주행  회피 경로 / 정지 듀티      ─구동
 ```
 
 **S-4 정지선 정지·재출발**
 ```
 인지  정지선/STOP 검출          ─scene(stop_signal=true)→
-판단  정지선 전 정지→재출발     ─maneuver(정지→순항)→
+판단  정지선 전 정지→재출발     ─command(정지→순항)→
 주행  듀티 0 → (재출발 시) 순항
 ```
 
 **안전 — 통신 두절 폴백**
 ```
 통신  link 산출                ─link_status(두절 ≥500ms)→
-판단  폴백(직전 명령 유지+서행) + 모드(서행) ─maneuver, mode→
+판단  폴백(직전 명령 유지+서행) + 모드(서행) ─command, mode→
 주행  서행 듀티
 ```
 
 **안전 — 비상정지(ESTOP)**
 ```
-판단  자체 정지 트리거 → 모드(비상정지) ─maneuver, mode→
+판단  자체 정지 트리거 → 모드(비상정지) ─command, mode→
 주행  즉시 듀티 0
 ```
 
@@ -110,8 +110,8 @@ bus.py         메시지 버스 + 토픽 7종 (DD-INF-01)
 config.py      포트·주기·링크임계값·PSK
 contracts.py   토픽 데이터 형식 전부 (ICD IF-B1~B6)
 perception.py  step(bus): 센서→scene            [인지]
-decision.py    step(bus): scene→maneuver·mode    [판단]
-motion.py      step(bus): maneuver→ego_state·구동 [모션]
+decision.py    step(bus): scene→command·mode    [판단]
+motion.py      step(bus): command→ego_state·구동 [모션]
 comm.py        step(bus): ego_state→STATE 송신 + RX 스레드 [통신]
 test_comm.py   STATE 코덱 테스트
 ```

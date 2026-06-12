@@ -9,7 +9,7 @@ import threading
 class Topics:
     """버스 토픽 정의 — 정의된 토픽만 사용 가능 (ICD 3장)"""
     SCENE = "perception/scene"             # IF-B1 인지 결과   (인지 → 판단·주행)
-    MANEUVER = "decision/maneuver"         # IF-B2 기동 명령   (판단 → 주행·통신)
+    COMMAND = "decision/command"           # IF-B2 주행 명령   (판단 → 주행·통신)
     MODE = "decision/mode"                 # IF-B3 시스템 모드 (판단 → 전 모듈)
     EGO_STATE = "motion/ego_state"         # IF-B4 자차 상태   (주행 → 통신)
     LEADER_STATE = "v2v/leader_state"      # IF-B5 선행차 상태 (통신 → 판단·주행, 후행 버스)
@@ -19,7 +19,7 @@ class Topics:
 
 # 버스가 인식하는 전체 토픽 (이 외 토픽 publish/read 시 거부)
 ALL_TOPICS = [
-    Topics.SCENE, Topics.MANEUVER, Topics.MODE, Topics.EGO_STATE,
+    Topics.SCENE, Topics.COMMAND, Topics.MODE, Topics.EGO_STATE,
     Topics.LEADER_STATE, Topics.FOLLOWER_STATE, Topics.LINK_STATUS,
 ]
 

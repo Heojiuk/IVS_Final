@@ -30,6 +30,8 @@ def load_key() -> bytes:
     """
     path = os.path.join(os.path.dirname(__file__), "psk.key")
     if os.path.exists(path):
-        with open(path, "rb") as f:
-            return f.read().strip()
-    return b"DEV-INSECURE-PSK-CHANGE-ME"   # TODO: 운영 전 psk.key 배포
+        key = open(path, "rb").read().strip()
+        if len(key) != 32:                      # ICD: PSK 32B
+            raise ValueError(f"psk.key 길이 {len(key)}B ≠ 32B")
+        return key
+    return b"DEVKEY-INSECURE-CHANGE-ME-32BYTE"   # 32B 개발용 (ICD PSK 32B). 운영 전 psk.key 배포
