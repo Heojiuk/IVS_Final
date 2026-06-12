@@ -1,3 +1,13 @@
 
 # Word/Office 임시 잠금파일
 ~$*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+
+# V2V 사전공유키 (각 차량 수동 배포)
+psk.key
