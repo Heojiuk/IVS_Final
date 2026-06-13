@@ -16,7 +16,7 @@ class DecisionModule:
         self.role = role          # 후행(FOLLOWER)만 leader_state로 추종 판단
 
     def step(self, bus):
-        """매 50ms 호출 — scene·링크·상대상태로 행동/모드를 정해 command·mode를 발행한다.  bus=메시지버스"""
+        """50ms 주기 — scene·링크·상대상태로 행동·모드 정해 command·mode를 bus에 전송.  bus=메시지버스"""
         scene = bus.read(Topics.SCENE)                 # 입력 IF-B1
         link = bus.read(Topics.LINK_STATUS)            # 입력 IF-B6
         leader = bus.read(Topics.LEADER_STATE)         # 입력 IF-B5 (후행만 사용)

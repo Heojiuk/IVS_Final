@@ -1,6 +1,6 @@
 # src/ — core_module(엔진+통신) + algorithm(인지·판단·모션)
 
-> **`core_module/`** = 엔진(버스·루프·설정) + 통신(comm) — 통신/인프라 1명. **`algorithm/`** = step() 도는 주행 로직(인지·판단·모션).
+> **`core_module/`** = 엔진(버스·루프·설정) + 통신(v2v) — 통신/인프라 1명. **`algorithm/`** = step() 도는 주행 로직(인지·판단·모션).
 
 ```
 src/
@@ -8,12 +8,12 @@ src/
   contracts.py                     공용 토픽 계약 (6명 공통, ICD와 1:1)
   core_module/                     엔진 + 통신 (통신/인프라 1명)
     bus.py  scheduler.py  config.py   엔진(버스·루프·설정)
-    comm.py                        통신 V2V 송수신
+    v2v.py                         통신 V2V 송수신
   algorithm/                       주행 알고리즘 = 매 50ms step() 도는 모듈
     perception.py                  인지 (2명)
     decision.py                    판단 (1명)
     motion_planning.py             모션 (2명)
-  tests/test_comm.py
+  tests/test_v2v.py
 ```
 
 ## 누가 어느 파일을 여는가 (6명)
@@ -26,7 +26,7 @@ src/
 | 모션 | 2 | `algorithm/motion_planning.py` | command → 제어·구동(GPIO), `ego_state` |
 | (공용) | 6 | `contracts.py` | 토픽 데이터 형식 — **모두가 보고, writer만 고침** |
 
-- `core_module/` = 엔진(bus·scheduler·config) + 통신(comm) 한 사람 소유. `algorithm/` = 인지·판단·모션 주행 로직.
+- `core_module/` = 엔진(bus·scheduler·config) + 통신(v2v) 한 사람 소유. `algorithm/` = 인지·판단·모션 주행 로직.
 - `contracts.py` 가 6명의 공통 약속(필드·타입·단위). 여기 정의된 dataclass만 버스로 주고받는다.
 - 한 모듈이 2명(인지·모션)이면 충돌 잦을 때 그 모듈만 폴더로 쪼개라(예: `algorithm/perception/lane.py`·`object.py`).
 
@@ -37,17 +37,17 @@ main()  →  build()  →  Scheduler.run()
                            ├─ perception.step(bus)
                            ├─ decision.step(bus)
                            ├─ motion.step(bus)
-                           └─ comm.step(bus)        (송신 TX)
-                       comm 의 수신(RX)은 별도 스레드 → 버스에 기록
+                           └─ v2v.step(bus)         (송신 TX)
+                       v2v 의 수신(RX)은 별도 스레드 → 버스에 기록
 ```
 main은 조립 후 스케줄러만 부르고, 스케줄러가 매 50ms 모듈 step()을 순차 호출.
 
 ## 버스 구조 (모듈 간 직접 호출 금지, 버스만 경유)
 ```
-perception ──scene──▶ decision ──command──▶ motion ──ego_state──▶ comm
+perception ──scene──▶ decision ──command──▶ motion ──ego_state──▶ v2v
                          ▲                     ▲                    │
                          └── link_status ──────┴── leader_state ────┘
-                                       (comm RX 스레드가 버스에 기록)
+                                       (v2v RX 스레드가 버스에 기록)
 ```
 - 쓰기: `bus.publish(Topics.X, data)`   읽기: `bus.read(Topics.X)`
 - **토픽은 `Topics`(bus.py)의 7종만**. 그 외 publish/read 시 거부 (DD-INF-01).
@@ -67,7 +67,7 @@ perception ──scene──▶ decision ──command──▶ motion ──ego
 ```
 cd src
 python main.py --role leader        # 또는 --role follower
-python tests/test_comm.py           # STATE 코덱 왕복·위변조 테스트
+python tests/test_v2v.py            # STATE 코덱 왕복·위변조 테스트
 ```
 로컬 1대에서 통신 테스트: 두 셸에서 `IVS_PEER_IP=127.0.0.1` 로 leader/follower 각각 실행.
 
@@ -124,9 +124,9 @@ contracts.py                  토픽 데이터 형식 전부 (ICD IF-B1~B6) — 
 core_module/bus.py            메시지 버스 + 토픽 7종 (DD-INF-01)
 core_module/scheduler.py      50ms 루프 (DD-INF-03)
 core_module/config.py         포트·주기·링크임계값·PSK (DD-INF-02)
-core_module/comm.py           step(bus): ego_state→STATE 송신 + RX 스레드 [통신]
+core_module/v2v.py            step(bus): ego_state→STATE 송신 + RX 스레드 [통신]
 algorithm/perception.py       step(bus): 센서→scene            [인지]
 algorithm/decision.py         step(bus): scene→command·mode    [판단]
 algorithm/motion_planning.py  step(bus): command→ego_state·구동 [모션]
-tests/test_comm.py            STATE 코덱 테스트
+tests/test_v2v.py             STATE 코덱 테스트
 ```

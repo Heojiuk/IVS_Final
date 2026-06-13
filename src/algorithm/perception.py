@@ -5,16 +5,16 @@
 """
 import time
 
-from core_module.bus import Topics
-from contracts import Scene
+from core_module.bus import Topics # 버스에 쓰이는 토픽
+from contracts import Scene # 전방 객체 및 차선 정보 (IF-B1)
 
-# 센서 핀 (ICD IF-H2 / HWD)
+# 센서 핀 (ICD IF-H2 / HWD) 개발자가 수정가능.
 ULTRASONIC_TRIG, ULTRASONIC_ECHO = 23, 24   # 전방 초음파 (ECHO 5V→3.3V 분압)
 
 
 class PerceptionModule:
     def step(self, bus):
-        """매 50ms 호출 — 센서를 읽어 Scene을 perception/scene에 발행한다.  bus=메시지버스"""
+        """50ms 주기 — 카메라·초음파로 전방 인지해 scene에 저장하여 bus에 전송.  bus=메시지버스"""
 
         # ===== ★ 인지팀 여기 작업 =====================================
         # TODO: picamera2(차선) · Hailo YOLO(객체) · 초음파(거리) 를 읽어

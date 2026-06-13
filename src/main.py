@@ -14,22 +14,22 @@ from contracts import Role
 from algorithm.perception import PerceptionModule
 from algorithm.decision import DecisionModule
 from algorithm.motion_planning import MotionModule
-from core_module.comm import CommModule
+from core_module.v2v import V2VModule
 
 
 def build(role):
-    """버스 1개 + 모듈 4개(인지·판단·주행·통신)를 조립해 (bus, modules, comm)을 반환한다.  role='leader'|'follower'"""
+    """버스 1개 + 모듈 4개(인지·판단·주행·통신)를 조립해 (bus, modules, v2v)을 반환한다.  role='leader'|'follower'"""
     role = role.lower()
     role_id = Role.LEADER if role == "leader" else Role.FOLLOWER
     bus = MessageBus()
-    comm = CommModule(role)
+    v2v = V2VModule(role)
     modules = [
         PerceptionModule(),
         DecisionModule(role_id),
         MotionModule(role_id),
-        comm,
+        v2v,
     ]
-    return bus, modules, comm
+    return bus, modules, v2v
 
 
 def main():
@@ -38,9 +38,9 @@ def main():
     ap.add_argument("--role", choices=["leader", "follower"], default="leader")
     args = ap.parse_args()
 
-    bus, modules, comm = build(args.role)
+    bus, modules, v2v = build(args.role)
     sched = Scheduler(config.LOOP_PERIOD_S, modules, bus)
-    comm.start(bus)                           # V2V 수신 스레드 기동
+    v2v.start(bus)                            # V2V 수신 스레드 기동
 
     signal.signal(signal.SIGINT, lambda *_: sched.stop())
     signal.signal(signal.SIGTERM, lambda *_: sched.stop())
@@ -49,7 +49,7 @@ def main():
     try:
         sched.run()
     finally:
-        comm.stop()
+        v2v.stop()
         print(f"[IVS] 종료 — cycles={sched.cycles} overruns={sched.overruns}")
 
 

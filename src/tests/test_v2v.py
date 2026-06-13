@@ -1,7 +1,7 @@
 """STATE 코덱 왕복 + HMAC 위변조 검출. 통신팀이 패킷 포맷을 검증하는 예시 테스트.
 
-실행:  cd src && python tests/test_comm.py        (pytest 없이도 동작)
-       cd src && python -m pytest tests/test_comm.py
+실행:  cd src && python tests/test_v2v.py        (pytest 없이도 동작)
+       cd src && python -m pytest tests/test_v2v.py
 """
 import os
 import sys
@@ -9,7 +9,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))   # src 를 import 경로에
 
 from contracts import EgoState, Role, DriveBehavior   # noqa: E402
-from core_module.comm import packet_generator, packet_parser, PACKET_LEN  # noqa: E402
+from core_module.v2v import packet_generator, packet_parser, PACKET_LEN  # noqa: E402
 
 KEY = b"test-key"
 
@@ -38,4 +38,4 @@ def test_tamper_rejected():
 if __name__ == "__main__":
     test_roundtrip()
     test_tamper_rejected()
-    print("OK: comm 코덱 왕복/위변조 테스트 통과")
+    print("OK: v2v 코덱 왕복/위변조 테스트 통과")

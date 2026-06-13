@@ -26,7 +26,7 @@ class MotionModule:
         self.role = role          # 후행(FOLLOWER)만 초음파 거리 보정
 
     def step(self, bus):
-        """매 50ms 호출 — command대로 throttle_pwm·steer_pwm을 산출해 GPIO 출력하고 ego_state를 발행한다.  bus=메시지버스"""
+        """50ms 주기 — command대로 throttle_pwm·steer_pwm 산출해 GPIO 출력하고 ego_state를 bus에 전송.  bus=메시지버스"""
         cmd = bus.read(Topics.COMMAND)                 # 입력 IF-B2 (behavior)
         scene = bus.read(Topics.SCENE)                 # 입력 IF-B1
         leader = bus.read(Topics.LEADER_STATE)         # 입력 IF-B5
