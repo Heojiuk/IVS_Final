@@ -15,14 +15,20 @@ class Scheduler:
         self._running = False
         self.cycles = 0          # 누적 사이클
         self.overruns = 0        # 주기 초과(데드라인 미스) 횟수
+        self.errors = 0          # 모듈 step() 예외 누적 (격리되어 루프는 계속 돎)
 
     def run(self):
-        """무한 루프 — 매 주기마다 모든 모듈 step(bus)을 순서대로 호출(드리프트 보정). stop() 전까지 반환 안 함.  파라미터 없음"""
+        """무한 루프 — 매 주기마다 모든 모듈 step(bus)을 순서대로 호출(드리프트 보정). stop() 전까지 반환 안 함.
+        모듈 step() 예외는 격리(로깅·카운트 후 다음 모듈로) — 한 모듈 오류가 전체 루프·통신을 멈추지 않음.  파라미터 없음"""
         self._running = True
         next_t = time.monotonic()
         while self._running:
             for m in self.modules:            # 인지 → 판단 → 주행 → 통신
-                m.step(self.bus)
+                try:
+                    m.step(self.bus)
+                except Exception as e:        # 한 모듈 예외가 전체 루프·통신을 죽이지 않게 격리
+                    self.errors += 1
+                    print(f"[scheduler] {type(m).__name__}.step() 예외 (건너뛰고 계속): {e!r}")
             self.cycles += 1
             next_t += self.period_s
             sleep = next_t - time.monotonic()

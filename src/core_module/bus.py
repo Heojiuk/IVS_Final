@@ -1,7 +1,7 @@
 """메시지 버스 — 공유메모리 pub/sub (DD-INF-01, ICD IF-B1~B6)
 
 모듈은 정의된 토픽(Topics)에만 publish/read 한다. 모듈 간 직접 호출 금지의 유일한 통로.
-단일 프로세스 공유메모리 + threading.Lock. 데이터 형식은 contracts.py 참조.
+단일 프로세스 공유메모리 + threading.Lock. 데이터 형식은 messages.py 참조.
 """
 import threading
 

@@ -17,7 +17,7 @@ import time
 
 from core_module import config
 from core_module.bus import Topics
-from contracts import V2VState, LinkStatus, LinkState, Role, DriveBehavior
+from messages import V2VState, LinkStatus, LinkState, Role, DriveBehavior
 
 # ── STATE 패킷 코덱 ───────────────────────────────────────────────────
 _FMT = "!BBBHdffB"

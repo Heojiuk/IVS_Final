@@ -10,7 +10,7 @@ import signal
 from core_module import config
 from core_module.bus import MessageBus
 from core_module.scheduler import Scheduler
-from contracts import Role
+from messages import Role
 from algorithm.perception import PerceptionModule
 from algorithm.decision import DecisionModule
 from algorithm.motion_planning import MotionModule

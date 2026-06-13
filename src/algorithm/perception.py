@@ -6,7 +6,7 @@
 import time
 
 from core_module.bus import Topics # 버스에 쓰이는 토픽
-from contracts import Scene # 전방 객체 및 차선 정보 (IF-B1)
+from messages import Scene # 전방 객체 및 차선 정보 (IF-B1)
 
 # 센서 핀 (ICD IF-H2 / HWD) 개발자가 수정가능.
 ULTRASONIC_TRIG, ULTRASONIC_ECHO = 23, 24   # 전방 초음파 (ECHO 5V→3.3V 분압)

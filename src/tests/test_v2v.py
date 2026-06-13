@@ -8,7 +8,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))   # src 를 import 경로에
 
-from contracts import EgoState, Role, DriveBehavior   # noqa: E402
+from messages import EgoState, Role, DriveBehavior   # noqa: E402
 from core_module.v2v import packet_generator, packet_parser, PACKET_LEN  # noqa: E402
 
 KEY = b"test-key"

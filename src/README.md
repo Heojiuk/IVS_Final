@@ -5,7 +5,7 @@
 ```
 src/
   main.py                          진입점 — 실행은 이것만 (python main.py --role leader)
-  contracts.py                     공용 토픽 계약 (6명 공통, ICD와 1:1)
+  messages.py                     공용 토픽 계약 (6명 공통, ICD와 1:1)
   core_module/                     엔진 + 통신 (통신/인프라 1명)
     bus.py  scheduler.py  config.py   엔진(버스·루프·설정)
     v2v.py                         통신 V2V 송수신
@@ -24,10 +24,10 @@ src/
 | 인지 | 2 | `algorithm/perception.py` | 카메라(차선·YOLO)+초음파 → `scene` |
 | 판단 | 1 | `algorithm/decision.py` | scene·V2V → `command`·`mode` |
 | 모션 | 2 | `algorithm/motion_planning.py` | command → 제어·구동(GPIO), `ego_state` |
-| (공용) | 6 | `contracts.py` | 토픽 데이터 형식 — **모두가 보고, writer만 고침** |
+| (공용) | 6 | `messages.py` | 토픽 데이터 형식 — **모두가 보고, writer만 고침** |
 
 - `core_module/` = 엔진(bus·scheduler·config) + 통신(v2v) 한 사람 소유. `algorithm/` = 인지·판단·모션 주행 로직.
-- `contracts.py` 가 6명의 공통 약속(필드·타입·단위). 여기 정의된 dataclass만 버스로 주고받는다.
+- `messages.py` 가 6명의 공통 약속(필드·타입·단위). 여기 정의된 dataclass만 버스로 주고받는다.
 - 한 모듈이 2명(인지·모션)이면 충돌 잦을 때 그 모듈만 폴더로 쪼개라(예: `algorithm/perception/lane.py`·`object.py`).
 
 ## 호출 구조
@@ -120,7 +120,7 @@ python tests/test_v2v.py            # STATE 코덱 왕복·위변조 테스트
 ## 파일
 ```
 main.py                       진입점 + 조립 (build → 스케줄러). 실행은 이것만.
-contracts.py                  토픽 데이터 형식 전부 (ICD IF-B1~B6) — 공용
+messages.py                  토픽 데이터 형식 전부 (ICD IF-B1~B6) — 공용
 core_module/bus.py            메시지 버스 + 토픽 7종 (DD-INF-01)
 core_module/scheduler.py      50ms 루프 (DD-INF-03)
 core_module/config.py         포트·주기·링크임계값·PSK (DD-INF-02)
