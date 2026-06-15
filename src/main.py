@@ -2,10 +2,12 @@
 
 호출 구조:  main() → build() → Scheduler.run() ──50ms──> module.step(bus)
 실행:       cd src && python main.py --role leader      (또는 --role follower)
-로컬 2프로세스 통신 테스트:  IVS_PEER_IP=127.0.0.1 두 셸에서 leader/follower 각각 실행.
+IP 모드:    환경변수 IVS_MODE = release(기본,192.168.0.x) | dev(강의실 WiFi) | loopback(127.0.0.1, 단일PC 2프로세스)
 """
 import argparse
+import hashlib
 import signal
+import sys
 
 from core_module import config
 from core_module.bus import MessageBus
@@ -22,7 +24,7 @@ def build(role):
     role = role.lower()
     role_id = Role.LEADER if role == "leader" else Role.FOLLOWER
     bus = MessageBus()
-    v2v = V2VModule(role)
+    v2v = V2VModule(role)  # 소켓 bind·키 로드가 여기서 일어남 (실패 시 OSError/ValueError)
     modules = [
         PerceptionModule(),
         DecisionModule(role_id),
@@ -33,24 +35,46 @@ def build(role):
 
 
 def main():
-    """진입점 — --role 파싱·조립·RX 기동 후 스케줄러를 돌린다(Ctrl+C까지).  파라미터 없음 (CLI: --role leader|follower)"""
-    ap = argparse.ArgumentParser(description="IVS V2V 군집주행 노드")
-    ap.add_argument("--role", choices=["leader", "follower"], default="leader")
+    """진입점 — --role 파싱 → 기동 전 조립·소켓·키 검증(실패 시 깔끔히 중단) → 스케줄러 실행(Ctrl+C까지)."""
+    ap = argparse.ArgumentParser(description="IVS V2V platooning node")
+    ap.add_argument("--role", choices=["leader", "follower"], required=True)  # 기본값 없음 — 역할 누락/중복 방지
     args = ap.parse_args()
 
-    bus, modules, v2v = build(args.role)
+    # ── 주행 시작 전 방어: 조립·소켓 bind·키 로드를 시도하고, 실패하면 raw 트레이스백 대신 명확히 중단 ──
+    try:
+        bus, modules, v2v = build(args.role)
+        cfg = config.for_role(args.role)
+        key_fp = hashlib.sha256(config.load_key()).hexdigest()[:8]
+    except OSError as e:
+        print(
+            f"[IVS] STARTUP FAILED (socket/port: {e}). "
+            "Another instance running, or duplicate --role on this Pi? Aborting.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except Exception as e:
+        print(f"[IVS] STARTUP FAILED: {e}. Aborting.", file=sys.stderr)
+        sys.exit(1)
+
     sched = Scheduler(config.LOOP_PERIOD_S, modules, bus)
-    v2v.start(bus)                            # V2V 수신 스레드 기동
+    v2v.start(bus)  # V2V RX 스레드 기동
 
     signal.signal(signal.SIGINT, lambda *_: sched.stop())
     signal.signal(signal.SIGTERM, lambda *_: sched.stop())
 
-    print(f"[IVS] role={args.role} 20Hz 루프 시작 (Ctrl+C 종료)")
+    # 기동 배너 — 운영자가 주행 전 역할·모드·상대·키지문을 육안 확인 (양 Pi 키지문 동일해야 함)
+    print(
+        f"[IVS] role={args.role} mode={config.mode()} rx_port={cfg['rx_port']} "
+        f"peer={cfg['peer_ip']}:{cfg['peer_port']} key={key_fp} "
+        f"-> 20Hz loop start (Ctrl+C to stop)"
+    )
     try:
         sched.run()
     finally:
         v2v.stop()
-        print(f"[IVS] 종료 — cycles={sched.cycles} overruns={sched.overruns}")
+        print(
+            f"[IVS] stopped — cycles={sched.cycles} overruns={sched.overruns} errors={sched.errors}"
+        )
 
 
 if __name__ == "__main__":

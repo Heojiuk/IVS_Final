@@ -28,7 +28,7 @@ class Scheduler:
                     m.step(self.bus)
                 except Exception as e:        # 한 모듈 예외가 전체 루프·통신을 죽이지 않게 격리
                     self.errors += 1
-                    print(f"[scheduler] {type(m).__name__}.step() 예외 (건너뛰고 계속): {e!r}")
+                    print(f"[scheduler] {type(m).__name__}.step() raised (skipped): {e!r}")
             self.cycles += 1
             next_t += self.period_s
             sleep = next_t - time.monotonic()

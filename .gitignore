@@ -11,3 +11,7 @@ __pycache__/
 
 # V2V 사전공유키 (각 차량 수동 배포)
 psk.key
+
+# Google Drive 업로드 인증 파일 (절대 커밋 금지)
+docs/credentials.json
+docs/token.json

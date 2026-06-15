@@ -69,7 +69,8 @@ cd src
 python main.py --role leader        # 또는 --role follower
 python tests/test_v2v.py            # STATE 코덱 왕복·위변조 테스트
 ```
-로컬 1대에서 통신 테스트: 두 셸에서 `IVS_PEER_IP=127.0.0.1` 로 leader/follower 각각 실행.
+로컬 1대에서 통신 테스트: 두 셸에서 `IVS_MODE=loopback` 으로 leader/follower 각각 실행.
+(IP 모드: `IVS_MODE=release` 문서 대역 192.168.0.x · `dev` 강의실 WiFi · `loopback` 127.0.0.1)
 
 ## 시나리오별 모듈 수행 시퀀스 (매 50ms 사이클)
 

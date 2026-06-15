@@ -16,17 +16,17 @@ KEY = b"test-key"
 
 def test_roundtrip():
     ego = EgoState(stamp=12.5, throttle_pwm=0.3, steer_pwm=-0.2, behavior=DriveBehavior.STOP)
-    pkt = packet_generator(ego, Role.LEADER, 7, KEY)
+    pkt = packet_generator(ego, 2, Role.LEADER, 7, KEY)   # lane=2
     assert len(pkt) == PACKET_LEN
     st = packet_parser(pkt, KEY)
     assert st.seq == 7 and st.role == Role.LEADER
-    assert st.behavior == DriveBehavior.STOP
+    assert st.behavior == DriveBehavior.STOP and st.lane == 2
     assert abs(st.throttle_pwm - 0.3) < 1e-6
     assert abs(st.steer_pwm - (-0.2)) < 1e-6
 
 
 def test_tamper_rejected():
-    pkt = bytearray(packet_generator(EgoState(throttle_pwm=0.5, behavior=DriveBehavior.FOLLOW), Role.FOLLOWER, 1, KEY))
+    pkt = bytearray(packet_generator(EgoState(throttle_pwm=0.5, behavior=DriveBehavior.FOLLOW), 1, Role.FOLLOWER, 1, KEY))
     pkt[9] ^= 0xFF                              # 본문 1바이트 변조
     try:
         packet_parser(bytes(pkt), KEY)

@@ -14,21 +14,23 @@ import hmac
 import hashlib
 import threading
 import time
+import sys
 
 from core_module import config
 from core_module.bus import Topics
 from messages import V2VState, LinkStatus, LinkState, Role, DriveBehavior
 
 # ── STATE 패킷 코덱 ───────────────────────────────────────────────────
-_FMT = "!BBBHdffB"
-_HDR = struct.calcsize(_FMT)  # 22
-PACKET_LEN = _HDR + 32  # 54
+# 본문 28B: [헤더] ver·type·role·seq·t_tx · [인지] lane+rsv · [판단] behavior+rsv · [모션] throttle·steer+rsv · [공통] rsv
+_FMT = "!BBBHdBxBxffxxx"  # x = reserved(향후 도메인별 확장, 송신 0·수신 무시)
+_HDR = struct.calcsize(_FMT)  # 28
+PACKET_LEN = _HDR + 32  # 60
 _VER, _STATE = 1, 1
 
 
-def packet_generator(ego, role, seq, key):
-    """EgoState를 54B STATE 패킷(bytes)으로 직렬화한다(본문 + HMAC).
-    ego=자차상태(throttle_pwm·steer_pwm·behavior), role=송신차량(Role 1선행/2후행), seq=일련번호(0~65535), key=HMAC PSK
+def packet_generator(ego, lane, role, seq, key):
+    """EgoState(+차로)를 60B STATE 패킷(bytes)으로 직렬화한다(본문 28B + HMAC 32B).
+    ego=자차상태(throttle_pwm·steer_pwm·behavior), lane=현재 차로(1·2·0), role=송신차량(Role 1선행/2후행), seq=일련번호(0~65535), key=HMAC PSK
     """
     body = struct.pack(
         _FMT,
@@ -37,28 +39,30 @@ def packet_generator(ego, role, seq, key):
         int(role),
         seq & 0xFFFF,
         ego.stamp,
-        ego.throttle_pwm,
+        int(lane),  # [인지]
+        int(ego.behavior),  # [판단]
+        ego.throttle_pwm,  # [모션]
         ego.steer_pwm,
-        int(ego.behavior),
     )
     return body + hmac.new(key, body, hashlib.sha256).digest()
 
 
 def packet_parser(pkt, key):
-    """수신 54B 패킷을 검증·역직렬화해 V2VState로 만든다. 길이/HMAC/버전 불일치 시 ValueError(폐기).
-    pkt=수신 바이트열(54B), key=HMAC PSK(송신측과 동일)"""
+    """수신 60B 패킷을 검증·역직렬화해 V2VState로 만든다. 길이/HMAC/버전 불일치 시 ValueError(폐기).
+    pkt=수신 바이트열(60B), key=HMAC PSK(송신측과 동일)"""
     if len(pkt) != PACKET_LEN:
         raise ValueError(f"길이 오류 {len(pkt)}≠{PACKET_LEN}")
     body, mac = pkt[:_HDR], pkt[_HDR:]
     if not hmac.compare_digest(mac, hmac.new(key, body, hashlib.sha256).digest()):
         raise ValueError("HMAC 불일치 — 위변조/키 불일치 패킷 폐기")
-    ver, typ, role, seq, t, thr, st, beh = struct.unpack(_FMT, body)
+    ver, typ, role, seq, t, lane, beh, thr, st = struct.unpack(_FMT, body)
     if ver != _VER or typ != _STATE:
         raise ValueError(f"미지원 패킷 ver={ver} type={typ}")
     return V2VState(
         t_tx=t,
         role=Role(role),
         seq=seq,
+        lane=lane,
         throttle_pwm=thr,
         steer_pwm=st,
         behavior=DriveBehavior(beh),
@@ -83,8 +87,10 @@ class V2VModule:
         self._rx.bind(("0.0.0.0", cfg["rx_port"]))
         self._rx.settimeout(0.5)
         self._seq = 0
+        self._tx_fail = 0  # TX 송신 실패 누적
+        self._lock = threading.Lock()  # _last_rx · _rx_seq 크로스스레드 보호
         self._last_rx = None  # 마지막 수신 monotonic 시각
-        self._rx_seq = 0
+        self._rx_seq = None  # 마지막 채택 seq (None=아직 수신 없음)
         self._bus = None
         self._stop = threading.Event()
         self._thread = threading.Thread(
@@ -93,52 +99,80 @@ class V2VModule:
 
     # 스케줄러 호출 — 송신(TX)
     def step(self, bus):
-        """50ms 주기 — 자차 ego_state를 STATE 패킷으로 송신하고 link_status를 갱신.  bus=메시지버스"""
+        """50ms 주기 — 자차 ego_state(+scene 차로)를 STATE 패킷으로 송신하고 link_status를 갱신.  bus=메시지버스"""
         ego = bus.read(Topics.EGO_STATE)  # 입력 IF-B4 (throttle_pwm·steer_pwm·behavior)
         if ego is not None:
+            scene = bus.read(Topics.SCENE)  # 입력 IF-B1 (current_lane)
+            lane = scene.current_lane if scene is not None else 0
             self._seq = (self._seq + 1) & 0xFFFF
             try:
                 self._tx.sendto(
-                    packet_generator(ego, self._role, self._seq, self._key), self._peer
+                    packet_generator(ego, lane, self._role, self._seq, self._key),
+                    self._peer,
                 )
-            except OSError:
-                pass  # TODO: 송신 실패 카운트/경보
+            except OSError as e:
+                self._tx_fail += 1  # 송신 실패 관측성 (첫 1회 + 100회마다 1줄)
+                if self._tx_fail == 1 or self._tx_fail % 100 == 0:
+                    print(
+                        f"[v2v] TX send failed x{self._tx_fail} to {self._peer}: {e}",
+                        file=sys.stderr,
+                    )
         bus.publish(Topics.LINK_STATUS, self._link_status())  # IF-B6
 
     # 별도 스레드 — 수신(RX), 비동기
     def _rx_loop(self):
-        """수신 스레드 루프 — 상대 STATE를 받아 검증·디코드 후 버스에 V2VState·link_status를 기록한다.  파라미터 없음"""
+        """수신 스레드 루프 — 상대 STATE를 받아 검증·디코드 후 버스에 V2VState를 기록한다.  파라미터 없음
+        link_status는 step()(main 스레드)에서만 게시 — 이중 게시로 인한 역행 방지."""
         while not self._stop.is_set():
             try:
-                data, _addr = self._rx.recvfrom(256)
+                data, _addr = self._rx.recvfrom(
+                    2048
+                )  # UDP 최대 크기보다 넉넉히 큰 버퍼 (실제 패킷은 54B)
             except socket.timeout:
                 continue
+            except OSError:
+                if self._stop.is_set():
+                    break  # stop()의 소켓 close → RX 스레드 정상 종료
+                continue  # 일시적 수신 오류(큰/오염 데이터그램 등) → 계속 수신
+
             try:
                 state = packet_parser(data, self._key)
             except ValueError:
-                continue  # 위변조/길이 오류 폐기
+                continue  # 길이/HMAC/버전 불일치 폐기
+
             now = time.monotonic()
-            self._last_rx = now
-            self._rx_seq = state.seq
+            with self._lock:
+                # seq 순차성: 더 최신 패킷만 채택 (16bit wrap-aware). 중복·과거(재정렬/replay) 폐기.
+                last = self._rx_seq
+                if last is not None:
+                    delta = (state.seq - last) & 0xFFFF
+                    if delta == 0 or delta >= 0x8000:
+                        continue  # 폐기 — _last_rx 미갱신(옛 패킷이 link 못 살림)
+                self._rx_seq = state.seq
+                self._last_rx = now
             state.t_rx = now  # 수신 시각 기록 (IF-B5)
             self._bus.publish(self._rx_topic, state)  # IF-B5
-            self._bus.publish(Topics.LINK_STATUS, self._link_status())  # IF-B6
 
     def _link_status(self):
         """마지막 수신 경과시간으로 링크 상태(ALIVE/STALE/LOST)를 판정해 LinkStatus를 반환한다.  파라미터 없음"""
         now = time.monotonic()
-        if self._last_rx is None:
+        with self._lock:
+            last_rx = self._last_rx  # 마지막 수신 시각 (None=아직 수신 없음)
+            rx_seq = (
+                self._rx_seq if self._rx_seq is not None else 0
+            )  # 마지막 채택 seq (None=아직 수신 없음 → 0으로 간주)
+        if last_rx is None:
             return LinkStatus(
-                stamp=now, state=LinkState.LOST, age_rx=9999.0, last_seq=self._rx_seq
+                stamp=now, state=LinkState.LOST, age_rx=9999.0, last_seq=rx_seq
             )
-        age = (now - self._last_rx) * 1000.0
-        if age < config.LINK_STALE_MS:
-            state = LinkState.ALIVE
-        elif age < config.LINK_LOST_MS:
-            state = LinkState.STALE
+        age = (now - last_rx) * 1000.0  # ms 단위
+        if age < config.LINK_STALE_MS:  # 50ms 미만 → ALIVE
+            state = LinkState.ALIVE  # 50ms 이상 200ms 미만 → STALE, 200ms 이상 → LOST
+        elif age < config.LINK_LOST_MS:  # 200ms 이상 500ms 미만 → STALE
+            state = LinkState.STALE  # 200ms 이상 → LOST
         else:
-            state = LinkState.LOST
-        return LinkStatus(stamp=now, state=state, age_rx=age, last_seq=self._rx_seq)
+            state = LinkState.LOST  # 500ms 이상 → LOST
+        return LinkStatus(stamp=now, state=state, age_rx=age, last_seq=rx_seq)
 
     # 생명주기 (main 이 호출, 스케줄러 아님)
     def start(self, bus):
@@ -151,3 +185,5 @@ class V2VModule:
         self._stop.set()
         self._tx.close()
         self._rx.close()
+        if self._thread.is_alive():
+            self._thread.join(timeout=1.0)  # RX 스레드 정상 종료 대기
