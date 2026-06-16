@@ -1,4 +1,4 @@
-import os, sys, time
+import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import _src_path; _src_path.add()
 
@@ -26,7 +26,17 @@ def test_defaults_are_safe():
     assert scene.front_clear is True
     assert scene.dist_front_m is None
 
+def test_dist_front_m_float_coercion():
+    bus = MessageBus()
+    sp = SimPerception()
+    sp.params['dist_front_m'] = 3.5
+    sp.step(bus)
+    scene = bus.read(Topics.SCENE)
+    assert isinstance(scene.dist_front_m, float)
+    assert abs(scene.dist_front_m - 3.5) < 1e-9
+
 if __name__ == '__main__':
     test_step_publishes_scene()
     test_defaults_are_safe()
+    test_dist_front_m_float_coercion()
     print('OK')

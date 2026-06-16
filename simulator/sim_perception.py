@@ -1,3 +1,4 @@
+import threading
 import time
 import _src_path; _src_path.add()
 
@@ -9,6 +10,7 @@ class SimPerception:
     """UI-controlled fake perception. Publish to bus every 50ms step()."""
 
     def __init__(self):
+        self._lock = threading.Lock()
         self.params = {
             'lane_valid': False,
             'current_lane': 0,
@@ -21,7 +23,8 @@ class SimPerception:
         }
 
     def step(self, bus):
-        p = self.params
+        with self._lock:
+            p = dict(self.params)
         scene = Scene(
             stamp=time.monotonic(),
             lane_valid=bool(p['lane_valid']),
@@ -30,7 +33,7 @@ class SimPerception:
             lane_heading_rad=float(p['lane_heading_rad']),
             lane_curvature_1pm=float(p['lane_curvature_1pm']),
             front_clear=bool(p['front_clear']),
-            dist_front_m=p['dist_front_m'],
+            dist_front_m=float(p['dist_front_m']) if p['dist_front_m'] is not None else None,
             stop_signal=bool(p['stop_signal']),
         )
         bus.publish(Topics.SCENE, scene)
