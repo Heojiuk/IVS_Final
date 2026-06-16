@@ -23,6 +23,7 @@ def test_roundtrip():
     assert st.behavior == DriveBehavior.STOP and st.lane == 2
     assert abs(st.throttle_pwm - 0.3) < 1e-6
     assert abs(st.steer_pwm - (-0.2)) < 1e-6
+    assert 0 <= st.tx_abs < 86_400_000   # 절대 송신시각(자정 기준 ms) 정상 범위
 
 
 def test_tamper_rejected():

@@ -3,9 +3,9 @@
   TX: 스케줄러가 매 50ms step() 호출 → 자차 PWM 명령+행동을 STATE 패킷으로 송신 + link_status 갱신.
   RX: 별도 스레드 → 수신·HMAC 검증·디코드 → 버스에 V2VState·link_status 기록.
 
-STATE 패킷 = 본문 22B + HMAC-SHA256 32B = 54B.
-  본문 '!BBBHdffB' = ver type role seq t_tx throttle_pwm steer_pwm behavior
-  (CONS-05: 속도·요 측정 불가 → PWM 명령 throttle_pwm·steer_pwm + 행동 behavior 만 전송)
+STATE 패킷 = 본문 28B + HMAC-SHA256 32B = 60B.
+  본문 '!BBBHdIBBffx' = ver type role seq t_tx(monotonic) tx_abs(절대 HH:mm:ss.fff) · [인지]lane · [판단]behavior · [모션]throttle_pwm steer_pwm · rsv
+  (CONS-05: 속도·요 측정 불가 → PWM 명령 throttle_pwm·steer_pwm + 행동 behavior + 차로 lane 만 전송)
 """
 
 import socket
@@ -21,15 +21,31 @@ from core_module.bus import Topics
 from messages import V2VState, LinkStatus, LinkState, Role, DriveBehavior
 
 # ── STATE 패킷 코덱 ───────────────────────────────────────────────────
-# 본문 28B: [헤더] ver·type·role·seq·t_tx · [인지] lane+rsv · [판단] behavior+rsv · [모션] throttle·steer+rsv · [공통] rsv
-_FMT = "!BBBHdBxBxffxxx"  # x = reserved(향후 도메인별 확장, 송신 0·수신 무시)
+# 본문 28B: [헤더] ver·type·role·seq·t_tx(monotonic)·tx_abs(절대시각 ms-of-day) · [인지] lane · [판단] behavior · [모션] throttle·steer · rsv(1)
+_FMT = "!BBBHdIBBffx"  # I=tx_abs(자정 기준 ms), x=reserved 1B(송신 0·수신 무시)
 _HDR = struct.calcsize(_FMT)  # 28
 PACKET_LEN = _HDR + 32  # 60
 _VER, _STATE = 1, 1
 
 
+def _tx_abs():
+    """현재 시스템 시각을 자정 기준 ms(0~86_399_999)로 — 패킷에 절대 송신시각(HH:mm:ss.fff) 싣는 용도.  파라미터 없음"""
+    t = time.time()
+    lt = time.localtime(t)
+    return ((lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec) * 1000 + int((t % 1) * 1000)) % 86_400_000
+
+
+def fmt_ms_of_day(ms):
+    """ms-of-day(0~86_399_999) → 'HH:MM:SS.fff' 문자열 (로그·검증 표시용).  ms=자정 기준 밀리초"""
+    h, ms = divmod(int(ms) % 86_400_000, 3_600_000)
+    m, ms = divmod(ms, 60_000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
+
+
 def packet_generator(ego, lane, role, seq, key):
     """EgoState(+차로)를 60B STATE 패킷(bytes)으로 직렬화한다(본문 28B + HMAC 32B).
+    송신 절대시각(tx_abs=자정 기준 ms)은 이 함수에서 자동으로 찍는다(leader/follower 공통).
     ego=자차상태(throttle_pwm·steer_pwm·behavior), lane=현재 차로(1·2·0), role=송신차량(Role 1선행/2후행), seq=일련번호(0~65535), key=HMAC PSK
     """
     body = struct.pack(
@@ -38,7 +54,8 @@ def packet_generator(ego, lane, role, seq, key):
         _STATE,
         int(role),
         seq & 0xFFFF,
-        ego.stamp,
+        ego.stamp,  # t_tx (monotonic, 상대적)
+        _tx_abs(),  # tx_abs (절대 HH:mm:ss.fff = 자정 기준 ms)
         int(lane),  # [인지]
         int(ego.behavior),  # [판단]
         ego.throttle_pwm,  # [모션]
@@ -55,11 +72,12 @@ def packet_parser(pkt, key):
     body, mac = pkt[:_HDR], pkt[_HDR:]
     if not hmac.compare_digest(mac, hmac.new(key, body, hashlib.sha256).digest()):
         raise ValueError("HMAC 불일치 — 위변조/키 불일치 패킷 폐기")
-    ver, typ, role, seq, t, lane, beh, thr, st = struct.unpack(_FMT, body)
+    ver, typ, role, seq, t, tx_abs, lane, beh, thr, st = struct.unpack(_FMT, body)
     if ver != _VER or typ != _STATE:
         raise ValueError(f"미지원 패킷 ver={ver} type={typ}")
     return V2VState(
         t_tx=t,
+        tx_abs=tx_abs,
         role=Role(role),
         seq=seq,
         lane=lane,
@@ -127,7 +145,7 @@ class V2VModule:
             try:
                 data, _addr = self._rx.recvfrom(
                     2048
-                )  # UDP 최대 크기보다 넉넉히 큰 버퍼 (실제 패킷은 54B)
+                )  # UDP 최대 크기보다 넉넉히 큰 버퍼 (실제 패킷은 60B = PACKET_LEN)
             except socket.timeout:
                 continue
             except OSError:
