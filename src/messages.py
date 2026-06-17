@@ -65,11 +65,11 @@ class Scene:                   # 인지 결과: 차선·전방·물체 (percepti
     stamp: float = 0.0                   # 이 데이터를 만든 시각 (초)
     lane_valid: bool = False             # 차선을 제대로 찾았나 (False면 아래 차선값 신뢰 X)
     current_lane: int = 0                # 현재 주행 차로 (1·2, 0=미확정/unknown)
-    lane_offset_m: float = 0.0           # 차로 중앙에서 좌우로 벗어난 거리 (m, 왼쪽이 +)
+    lane_offset_cm: float = 0.0          # 차로 중앙에서 좌우로 벗어난 거리 (cm, 왼쪽이 +)
     lane_heading_rad: float = 0.0        # 차선 방향과 차 방향의 각도 차 (rad)
     lane_curvature_1pm: float = 0.0      # 차선이 휜 정도 (1/m, 좌회전 +). 0이면 직선
     front_clear: bool = True             # 앞이 비었나 (카메라+초음파 종합 판단)
-    dist_front_m: Optional[float] = None # 앞 장애물까지 거리 (m). 못 재면 None
+    dist_front_cm: Optional[float] = None # 앞 장애물까지 거리 (cm). 못 재면 None
     stop_signal: bool = False            # 정지선·STOP 표지를 봤나
     objects: List[Detection] = field(default_factory=list)   # 검출한 물체 목록 (위 Detection들)
 
