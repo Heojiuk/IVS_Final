@@ -691,8 +691,9 @@ def draw_hud(img, data):
     if data["lane_offset_px"] is None:
         put("offset: --", 1, (0, 0, 255))
     else:
-        put(f"offset: {data['lane_offset_px']:+.0f}px "
-            f"({data['lane_offset_norm']:+.2f})", 1)
+        off_cm = data['lane_offset_px'] * M_PER_PX_X * 100.0   # 버스로 가는 값 (cm)
+        put(f"offset: {data['lane_offset_px']:+.0f}px / "
+            f"{off_cm:+.1f}cm ({data['lane_offset_norm']:+.2f})", 1)
     w = data["lane_width_px"]
     put(f"lane width: {w:.0f}px" if w else "lane width: --", 2)
     m    = data["markings"]
