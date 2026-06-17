@@ -8,15 +8,8 @@ Scene 으로 발행(이미 구현). 하드웨어 라이브러리는 지연 impor
   ultrasonic_loop : gpiozero DistanceSensor → update_distance
   ObjectDetector  : detect.py(단일 소스) 재사용 → List[Detection]
 """
-import os
-import sys
 import threading
 import time
-
-# detect.py(프로젝트 루트, 객체 인식 단일 소스) 와 messages 를 import 가능하게
-_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
 
 from messages import Detection
 
@@ -41,7 +34,7 @@ class ObjectDetector:
     """
 
     def __init__(self, hef_path="yolov11n.hef"):
-        import detect  # 단일 소스
+        from algorithm import object_detection as detect  # 객체 인식 단일 소스
         from hailo_platform import (
             HEF, VDevice, HailoStreamInterface, InferVStreams,
             ConfigureParams, InputVStreamParams, OutputVStreamParams, FormatType,
@@ -175,7 +168,7 @@ def camera_loop(perception, stop_event, hef_path="yolov11n.hef", debug_view=Fals
 
 def _show_debug(cv2, frame_rgb, objects, bev_vis, roi_y0_frac, dist_m=None):
     """디버그 두 창 렌더 (camera_loop debug_view 전용)."""
-    import detect as _d
+    from algorithm import object_detection as _d
     # picamera2 "RGB888" 배열은 실제로 BGR 순서 → cv2/imshow 에 그대로 사용 (변환 금지)
     cam_bgr = frame_rgb.copy()
     h, w = cam_bgr.shape[:2]

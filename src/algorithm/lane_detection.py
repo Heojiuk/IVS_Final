@@ -1,33 +1,33 @@
 #!/usr/bin/env python3
 """
-3_Lane_detection_v2.2.py  -- Perception module (robust ego-lane via near-field)
+lane_detection.py  -- 차선 인지 처리 모듈 (BEV+HSV, ex-3_Lane_detection_v2.3)
 
-Changes vs v2.1:
-  E1. detect_ego_lane_nearfield: decide ego lane from the ORIGINAL image bottom ROI
-                                 (ground right in front of the car). Robust to
-                                 yaw/curve because near-field lines are not yet swept.
-  E2. EgoLaneTracker           : hysteresis - hold the lane; switch only after
-                                 SWITCH_FRAMES consecutive opposite reads. A transient
-                                 yaw glitch keeps the lane; a real lane change switches.
-  E3. build_lane_data_v2       : accepts forced_ego (from the tracker) as the
-                                 authoritative ego lane, overriding the BEV vote.
-  E4. main()                   : near-field detect (before warp) -> tracker -> forced_ego.
-  E5. draw_hud                 : shows locked ego + near-field read + switch progress.
+Changes vs v2.2:
+  F1. center_fit (reconstruct) : build the ego-lane center from ANY visible markings +
+                                 fixed lane width. Yellow missing? estimate it from the
+                                 green(s). -> offset/heading survive yellow dropouts and
+                                 lane-change crossings (no more all "--").
+  F2. build_lane_data_v2       : offset/center now DRIVEN by center_fit (not hard-anchored
+                                 on yellow), so it works whenever any marking is visible.
+  F3. draw_overlay (clip)      : polylines stop at the frame edge -> no out-of-frame
+                                 loop on sharp curves (the v2.2 magenta-loop bug).
+  F4. CurvFilter               : reject blow-up curvature (radius < MIN) + light EMA.
 
-Kept from v2.1: center_fit, heading_rad/curvature_1pm, HUD rad+deg, center-line viz.
+Kept from v2.2: near-field ego detect, EgoLaneTracker hysteresis, heading/curvature,
+                HUD rad+deg, center-line viz.
 
 Notes:
-  - Near-field ROI = bottom of the original frame (confirmed: car front = image bottom).
+  - Reconstruction assumes the green|lane|yellow|lane|green structure with fixed width.
   - sign of heading/offset and LEFT/RIGHT must be verified on hardware (hflip+vflip).
   - curvature (1/m) needs REAL_LANE_WIDTH_M measured on the track.
+  - lane-change TARGET-lane following is added at integration time (read DriveCommand);
+    standalone here always follows the current (ego-lock) lane.
 """
 
 import cv2
 import math
 import numpy as np
 from collections import deque
-from picamera2 import Picamera2
-from libcamera import Transform
 
 # ============================================================
 # Camera / BEV geometry  (keep in sync with 2_Apply_IPM.py)
@@ -58,8 +58,9 @@ GREEN_HIGH  = (90, 255, 255)
 # ============================================================
 # Lane-detection tuning
 # ============================================================
-EGO_CENTER_X   = WARP_W // 2
-LANE_WIDTH_PX  = 150
+EGO_CENTER_X   = 182        # 차 중심선의 BEV 위치(px) — 캘리: 차 자로재서 정확히 중앙일 때 lane_center
+                            #   (WARP_W//2=200 아님 — 카메라가 차 중심서 살짝 우측 장착)
+LANE_WIDTH_PX  = 119        # BEV 측정 한 차로폭(px) — 캘리 페어 119px↔24cm
 NEAR_FIELD_FRAC = 0.5
 CONTROL_Y      = int(WARP_H * 0.90)
 
@@ -77,9 +78,14 @@ OVERLAY_ALPHA  = 0.45
 # ============================================================
 # [v2.1] Metric conversion (for heading scale + curvature in 1/m)
 # ============================================================
-REAL_LANE_WIDTH_M = 0.30                          # MEASURE on track! real lane width (m)
-M_PER_PX_X = REAL_LANE_WIDTH_M / LANE_WIDTH_PX     # horizontal scale (m/px)
+REAL_LANE_WIDTH_M = 0.24                          # 실측: 한 차로폭(차선 라인 포함) 0.24m
+M_PER_PX_X = REAL_LANE_WIDTH_M / LANE_WIDTH_PX     # horizontal scale (m/px) = 0.24/119 ~ 0.00202
 M_PER_PX_Y = M_PER_PX_X                            # vertical scale; set from BEV depth if anisotropic
+
+# [F4] curvature gate: reject fits sharper than the track's min radius (blow-ups)
+MIN_CURVE_RADIUS_M = 0.20                          # real min ~0.35m; 0.20 is a loose gate
+MAX_CURVATURE_1PM  = 1.0 / MIN_CURVE_RADIUS_M      # |curvature| above this -> reject + hold
+CURV_EMA_ALPHA     = 0.30                          # light smoothing on accepted curvature
 
 # ============================================================
 # [B1] Ego-lane vote rows  (fraction of WARP_H, bottom->top)  (kept as fallback)
@@ -419,7 +425,7 @@ def detect_ego_lane_nearfield(bgr):
     yhist = np.sum(ymask, axis=0).astype(float)        # column sums
     if yhist.max() < NEAR_MIN_SUM:
         return None                                    # no yellow near -> no reading
-
+                                                       # (녹색은 2개라 모호 → 기준 안 씀)
     yellow_x = int(np.argmax(yhist))
     car_x    = w // 2                                  # camera optical axis ~ car center
     return "LEFT" if car_x < yellow_x else "RIGHT"
@@ -470,30 +476,77 @@ _ego_tracker = EgoLaneTracker()
 # [D1] center_fit  -- ego-lane center polynomial
 # ============================================================
 
-def center_fit(markings, ego_lane):
+def _shift(fit, dx):
+    """Return a copy of a polyfit shifted horizontally by dx px (constant term only)."""
+    c = fit.copy(); c[2] += dx
+    return c
+
+
+def estimate_yellow_fit(markings):
     """
-    Lane-center polynomial for the ego lane.
-      - Both boundaries visible -> average the two marking fits.
-      - One boundary missing     -> shift the yellow fit by half a (fixed) lane width.
-        Lane width is constant, so only the constant term C moves; slope/curvature
-        stay (parallel). LEFT lane center sits LEFT of yellow (-), RIGHT lane (+).
-    Returns ndarray of coeffs [A, B, C] or None.
+    [F1] Estimate the yellow (center divider) polynomial from whatever is visible.
+    Structure: left_green | W | yellow | W | right_green  (W = LANE_WIDTH_PX, fixed).
+      yellow present        -> yellow
+      both greens           -> midpoint of the two greens
+      left green only       -> left_green + W   (yellow is one lane to its right)
+      right green only      -> right_green - W
+      nothing               -> None
     """
     y, lg, rg = markings["yellow"], markings["left_green"], markings["right_green"]
-    if y is None:
-        return None
+    W = LANE_WIDTH_PX
+    if y is not None:
+        return y
+    if lg is not None and rg is not None:
+        return (lg + rg) / 2.0
+    if lg is not None:
+        return _shift(lg, +W)
+    if rg is not None:
+        return _shift(rg, -W)
+    return None
 
+
+def center_fit(markings, ego_lane):
+    """
+    Lane-center polynomial for the requested lane, from ANY visible markings.
+      - Both real boundaries of the lane visible -> average them (most accurate).
+      - Otherwise -> estimate yellow (estimate_yellow_fit) and shift half a lane width
+        toward the lane center. LEFT center sits LEFT of yellow (-), RIGHT (+).
+    Returns ndarray of coeffs [A, B, C] or None (no markings at all).
+    """
+    y, lg, rg = markings["yellow"], markings["left_green"], markings["right_green"]
     half = LANE_WIDTH_PX / 2.0
-    if ego_lane == "LEFT":
-        if lg is not None:
-            return (y + lg) / 2.0
-        c = y.copy(); c[2] -= half          # center is half a lane LEFT of yellow
-        return c
-    else:  # RIGHT
-        if rg is not None:
-            return (y + rg) / 2.0
-        c = y.copy(); c[2] += half          # center is half a lane RIGHT of yellow
-        return c
+
+    if ego_lane == "LEFT" and y is not None and lg is not None:
+        return (lg + y) / 2.0
+    if ego_lane == "RIGHT" and y is not None and rg is not None:
+        return (y + rg) / 2.0
+
+    y_est = estimate_yellow_fit(markings)
+    if y_est is None:
+        return None
+    return _shift(y_est, -half if ego_lane == "LEFT" else +half)
+
+
+# ============================================================
+# [F4] CurvFilter  -- reject blow-up curvature, then light EMA
+# ============================================================
+
+class CurvFilter:
+    def __init__(self, max_curv=MAX_CURVATURE_1PM, alpha=CURV_EMA_ALPHA):
+        self.max_curv = max_curv
+        self.alpha    = alpha
+        self.val      = None
+
+    def update(self, c):
+        if c is None:
+            return self.val                          # no measurement -> hold
+        if abs(c) > self.max_curv:
+            return self.val                          # physically implausible -> reject + hold
+        self.val = c if self.val is None else self.alpha * c + (1 - self.alpha) * self.val
+        return self.val
+
+
+_curv_filter = CurvFilter()
 
 
 # ============================================================
@@ -527,69 +580,43 @@ def compute_heading_curvature(markings, ego_lane):
 
 def build_lane_data_v2(markings, forced_ego=None) -> dict:
     """
-    1. Call original build_lane_data (geometry unchanged).
-    2. [E3] ego_lane = forced_ego (near-field tracker) if given, else BEV 5-row vote.
-       If it disagrees with geometry, recalculate lane boundaries so the published
-       offset is consistent with the chosen ego lane.
-    3. Pass through LaneStateSanity.
-    4. [E3] Re-assert forced_ego (sanity's own ego-vote must not override the tracker).
-    5. [D3] Fill heading_rad / curvature_1pm from the center fit.
+    [F2] Center-fit-driven. ego_lane = forced_ego (near-field tracker) if given, else
+    the BEV vote, else geometry. Offset/center/heading/curvature all come from the
+    reconstructed lane-center fit -- so they survive a missing yellow line.
     """
-    data = build_lane_data(markings)
+    data = build_lane_data(markings)   # markings flags, num_lanes, fallback fields
 
-    # -- Step 1: choose ego lane (near-field tracker wins; vote is fallback) --
+    # -- Step 1: choose ego lane (near-field tracker wins; vote/geometry fallback) --
     if forced_ego is not None:
-        ego_vote = forced_ego
-        adj_vote = "RIGHT" if forced_ego == "LEFT" else "LEFT"
+        ego = forced_ego
     else:
-        ego_vote, adj_vote = classify_ego_lane_robust(markings)
+        ego = classify_ego_lane_robust(markings)[0] or data.get("ego_lane")
 
-    if (ego_vote is not None and markings["yellow"] is not None
-            and ego_vote != data.get("ego_lane")):
-        # Disagrees with geometry AND yellow exists -- recalc boundaries with chosen lane
-        yellow = markings["yellow"]
-        lg     = markings["left_green"]
-        rg     = markings["right_green"]
-        yx     = poly_x(yellow, CONTROL_Y)
-        lgx    = poly_x(lg, CONTROL_Y) if lg is not None else None
-        rgx    = poly_x(rg, CONTROL_Y) if rg is not None else None
-
-        if ego_vote == "LEFT":
-            left_b  = lgx if lgx is not None else yx - LANE_WIDTH_PX
-            right_b = yx
-        else:
-            left_b  = yx
-            right_b = rgx if rgx is not None else yx + LANE_WIDTH_PX
-
-        lane_center = (left_b + right_b) / 2.0
-        width       = abs(right_b - left_b)
-        offset      = float(np.clip(lane_center - EGO_CENTER_X,
-                                    -MAX_OFFSET_PX, MAX_OFFSET_PX))
-
-        data["ego_lane"]           = ego_vote
-        data["adjacent_lane"]      = adj_vote
-        data["lane_width_px"]      = float(width)
-        data["ego_lane_center_px"] = float(lane_center)
+    # -- Step 2: geometry from the reconstructed center fit (yellow not required) --
+    cfit = center_fit(markings, ego) if ego is not None else None
+    if cfit is not None:
+        cx     = poly_x(cfit, CONTROL_Y)
+        offset = float(np.clip(cx - EGO_CENTER_X, -MAX_OFFSET_PX, MAX_OFFSET_PX))
+        data["ego_lane"]           = ego
+        data["adjacent_lane"]      = "RIGHT" if ego == "LEFT" else "LEFT"
+        data["ego_lane_center_px"] = float(cx)
         data["lane_offset_px"]     = offset
         data["lane_offset_norm"]   = float(np.clip(offset / (LANE_WIDTH_PX / 2.0), -1, 1))
+        if data["lane_width_px"] is None:
+            data["lane_width_px"] = float(LANE_WIDTH_PX)   # reconstructed -> assume fixed
 
-    elif ego_vote is not None:
-        # Vote agrees -- just make sure the fields are set
-        data["ego_lane"]      = ego_vote
-        data["adjacent_lane"] = adj_vote
-
-    # -- Step 2: sanity guard -------------------------------
+    # -- Step 3: sanity guard -------------------------------
     data = _sanity.check(data)
 
-    # -- Step 2b [E3]: tracker is authoritative -- override sanity's ego vote --
+    # -- Step 3b: tracker is authoritative -- override sanity's ego vote --
     if forced_ego is not None:
         data["ego_lane"]      = forced_ego
         data["adjacent_lane"] = "RIGHT" if forced_ego == "LEFT" else "LEFT"
 
-    # -- Step 3 [D3]: heading + curvature (uses final ego_lane) ----
+    # -- Step 4: heading + curvature from the center fit, with curvature gate+EMA --
     head, curv = compute_heading_curvature(markings, data.get("ego_lane"))
     data["lane_heading_rad"]   = head
-    data["lane_curvature_1pm"] = curv
+    data["lane_curvature_1pm"] = _curv_filter.update(curv)
 
     return data
 
@@ -598,8 +625,21 @@ def build_lane_data_v2(markings, forced_ego=None) -> dict:
 # Visualization helpers  ([D4] HUD prints heading rad+deg, curvature)
 # ============================================================
 
+def _clip_poly_points(fit):
+    """[F3] Points of x=fit(y) from the car (bottom) upward, stopping at the frame edge.
+    Prevents drawing the parabola's out-of-frame loop on sharp curves."""
+    ys = np.arange(WARP_H - 1, -1, -1)
+    xs = poly_x(fit, ys)
+    inside = (xs >= 0) & (xs < WARP_W)
+    if not inside[0]:
+        return None                                 # car-position point already out of frame
+    cut = len(ys) if inside.all() else int(np.argmin(inside))  # stop at first out-of-frame
+    if cut < 2:
+        return None
+    return np.int32(np.column_stack((xs[:cut], ys[:cut])))
+
+
 def draw_overlay(overlay, markings, data):
-    ploty  = np.linspace(0, WARP_H - 1, WARP_H)
     colors = {
         "left_green":  (0, 255, 0),
         "right_green": (0, 255, 0),
@@ -608,9 +648,9 @@ def draw_overlay(overlay, markings, data):
     for key, color in colors.items():
         fit = markings[key]
         if fit is not None:
-            xs  = poly_x(fit, ploty)
-            pts = np.int32(np.column_stack((xs, ploty)))
-            cv2.polylines(overlay, [pts], False, color, 3)
+            pts = _clip_poly_points(fit)
+            if pts is not None:
+                cv2.polylines(overlay, [pts], False, color, 3)
 
     # Reference line = vehicle forward axis (BEV vertical). heading is measured
     # as the angle of the center line relative to THIS line.
@@ -620,10 +660,9 @@ def draw_overlay(overlay, markings, data):
     # [D5] Derived lane-center polynomial (the curve heading/curvature come from)
     cfit = center_fit(markings, data.get("ego_lane"))
     if cfit is not None:
-        ploty = np.linspace(0, WARP_H - 1, WARP_H)
-        xs    = poly_x(cfit, ploty)
-        pts   = np.int32(np.column_stack((xs, ploty)))
-        cv2.polylines(overlay, [pts], False, (255, 0, 255), 2)   # magenta = center fit
+        pts = _clip_poly_points(cfit)                # [F3] clipped -> no out-of-frame loop
+        if pts is not None:
+            cv2.polylines(overlay, [pts], False, (255, 0, 255), 2)   # magenta = center fit
 
         # [D5] heading tangent at the car: the center direction we compare to vertical
         y0    = CONTROL_Y
@@ -651,8 +690,9 @@ def draw_hud(img, data):
     if data["lane_offset_px"] is None:
         put("offset: --", 1, (0, 0, 255))
     else:
-        put(f"offset: {data['lane_offset_px']:+.0f}px "
-            f"({data['lane_offset_norm']:+.2f})", 1)
+        off_cm = data['lane_offset_px'] * M_PER_PX_X * 100.0   # 버스로 가는 값 (cm)
+        put(f"offset: {data['lane_offset_px']:+.0f}px / "
+            f"{off_cm:+.1f}cm ({data['lane_offset_norm']:+.2f})", 1)
     w = data["lane_width_px"]
     put(f"lane width: {w:.0f}px" if w else "lane width: --", 2)
     m    = data["markings"]
@@ -682,90 +722,11 @@ def draw_hud(img, data):
     cnt  = data.get("ego_switch_cnt", 0)
     put(f"ego-lock: {ego}  near: {near}  switch: {cnt}/{SWITCH_FRAMES}", 6)
 
-
-# ============================================================
-# main  -- two call-sites use the v2 functions
-# ============================================================
-
-def main():
-    sx = PREVIEW_SIZE[0] / POINTS_REF_SIZE[0]
-    sy = PREVIEW_SIZE[1] / POINTS_REF_SIZE[1]
-    src_scaled = [[x * sx, y * sy] for x, y in SRC_POINTS]
-    M = make_transform(src_scaled)
-
-    picam2 = Picamera2()
-    config = picam2.create_preview_configuration(
-        main={"size": PREVIEW_SIZE, "format": "YUV420"},
-        raw={"size": (2304, 1296)},
-        transform=Transform(hflip=1, vflip=1),
-        controls={"FrameRate": FRAME_RATE},
-        buffer_count=4,
-    )
-    picam2.configure(config)
-    picam2.start()
-
-    print("Lane detection v2.2 (Perception). Press ESC to quit.")
-    print(f"  FitEMA alpha={FIT_EMA_ALPHA}, max_miss={MAX_MISS}")
-    print(f"  Near-field ROI y0={NEAR_ROI_Y0_FRAC}, switch_frames={SWITCH_FRAMES}")
-    print(f"  Scale: m_per_px_x={M_PER_PX_X:.5f} (REAL_LANE_WIDTH_M={REAL_LANE_WIDTH_M})")
-    print(f"  Sanity: max_width_jump={LaneStateSanity.MAX_WIDTH_JUMP_FRAC*100:.0f}%,"
-          f" max_offset_jump={LaneStateSanity.MAX_OFFSET_JUMP_PX}px,"
-          f" ego_history={LaneStateSanity.EGO_HISTORY_LEN}f")
-
-    smooth_offset = None
-    try:
-        while True:
-            yuv = picam2.capture_array()
-            bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
-
-            # [E4] ego lane from ORIGINAL near-field (before warp) -> hysteresis tracker
-            observed = detect_ego_lane_nearfield(bgr)
-            ego_lock = _ego_tracker.update(observed)
-
-            bev = cv2.warpPerspective(bgr, M, (WARP_W, WARP_H))   # unchanged
-            yellow_mask, green_mask = color_masks(bev)
-
-            markings = detect_markings_v2(yellow_mask, green_mask)
-            data     = build_lane_data_v2(markings, forced_ego=ego_lock)
-
-            # debug fields for HUD (not part of the bus contract)
-            data["ego_nearfield"]   = observed
-            data["ego_switch_cnt"]  = _ego_tracker._count
-
-            if data["lane_offset_px"] is not None:
-                o = data["lane_offset_px"]
-                smooth_offset = (o if smooth_offset is None
-                                 else EMA_ALPHA * o + (1 - EMA_ALPHA) * smooth_offset)
-                data["lane_offset_smooth_px"] = float(smooth_offset)
-            else:
-                data["lane_offset_smooth_px"] = None
-
-            # ---- `data` is the perception output for the bus ----
-            #   lane_offset_m   = lane_offset_smooth_px * M_PER_PX_X
-            #   lane_heading_rad = data["lane_heading_rad"]      (already rad)
-            #   lane_curvature_1pm = data["lane_curvature_1pm"]  (already 1/m)
-
-            overlay = bev.copy()
-            draw_overlay(overlay, markings, data)
-            vis = cv2.addWeighted(overlay, OVERLAY_ALPHA, bev, 1 - OVERLAY_ALPHA, 0)
-            draw_hud(vis, data)
-
-            masks_view = cv2.merge([np.zeros_like(green_mask),
-                                    green_mask, yellow_mask])
-
-            cv2.imshow('BEV Raw',        bev)
-            cv2.imshow('Lane Detection', vis)
-            cv2.imshow('Masks',          masks_view)
-
-            if cv2.waitKey(1) & 0xFF == 27:
-                break
-    except KeyboardInterrupt:
-        pass
-    finally:
-        picam2.stop()
-        picam2.close()
-        cv2.destroyAllWindows()
+    # [CAL] 차로중앙 px vs EGO_CENTER_X — 차 정확히 중앙일 때 이 lane_center 값을 EGO_CENTER_X로
+    cx = data.get("ego_lane_center_px")
+    cx_txt = "--" if cx is None else f"{cx:.0f}"
+    put(f"lane_center: {cx_txt}px   EGO_CENTER_X: {EGO_CENTER_X}", 7)
 
 
-if __name__ == "__main__":
-    main()
+# 카메라 루프/표시는 통합(sensing.camera_loop + lane_pipeline)이 담당.
+# 이 모듈은 순수 처리 함수만 제공한다 (standalone main 없음).

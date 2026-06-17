@@ -1,25 +1,15 @@
-"""차선 처리 어댑터 — 3_Lane_detection_v2.3.py(단일 소스)를 재사용.
+"""차선 처리 어댑터 — lane_detection 모듈을 써서 프레임 1장 → Scene 계약 5튜플.
 
-v2.3 파일명이 import 불가(숫자·점)라 importlib로 로드한다. 카메라/표시 코드는 빼고
-프레임 1장 → Scene 계약 5튜플로 변환하는 process() 만 노출.
+  process(bgr)      -> (lane_valid, current_lane, lane_offset_m, lane_heading_rad, lane_curvature_1pm)
+  process_view(bgr) -> (위 5튜플, BEV 시각화 이미지)  # 디버그용
 
-  process(bgr) -> (lane_valid, current_lane, lane_offset_m, lane_heading_rad, lane_curvature_1pm)
-
-v2.3 의 모듈 상태(FitEMA·sanity·EgoLaneTracker·CurvFilter)는 싱글톤이라 프레임 간 유지됨.
+lane_detection 의 모듈 상태(FitEMA·sanity·EgoLaneTracker·CurvFilter)는 싱글톤이라 프레임 간 유지됨.
 """
-import importlib.util
-import os
-
 import cv2
 
-_ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
-_V23_PATH = os.path.join(_ROOT, "3_Lane_detection_v2.3.py")
+from algorithm import lane_detection as _L
 
-_spec = importlib.util.spec_from_file_location("lane_v23", _V23_PATH)
-_L = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_L)   # v2.3 로드 (top-level에 picamera2 import 있음 → 파이에서만 OK)
-
-# BEV 변환행렬 1회 계산 (v2.3 main 과 동일)
+# BEV 변환행렬 1회 계산
 _sx = _L.PREVIEW_SIZE[0] / _L.POINTS_REF_SIZE[0]
 _sy = _L.PREVIEW_SIZE[1] / _L.POINTS_REF_SIZE[1]
 _src = [[x * _sx, y * _sy] for x, y in _L.SRC_POINTS]
