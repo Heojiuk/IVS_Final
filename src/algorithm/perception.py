@@ -105,11 +105,11 @@ class PerceptionModule:
             stamp=time.monotonic(),
             lane_valid=p['lane_valid'],
             current_lane=p['current_lane'],
-            lane_offset_m=p['lane_offset_m'],
+            lane_offset_cm=p['lane_offset_m'] * 100.0,             # 내부 m → 계약 cm
             lane_heading_rad=p['lane_heading_rad'],
             lane_curvature_1pm=p['lane_curvature_1pm'],
             front_clear=front_clear,
-            dist_front_m=dist,
+            dist_front_cm=(dist * 100.0 if dist is not None else None),  # m → cm
             stop_signal=stop_signal,
             objects=objects,
         )

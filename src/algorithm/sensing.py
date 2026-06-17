@@ -95,14 +95,29 @@ class ObjectDetector:
 
 
 def ultrasonic_loop(perception, stop_event):
-    """HC-SR04 거리 → perception.update_distance() 20Hz. 범위 밖이면 None."""
-    from gpiozero import DistanceSensor
-    sensor = DistanceSensor(echo=ULTRA_ECHO, trigger=ULTRA_TRIG,
-                            max_distance=ULTRA_MAX_DIST_M)
+    """HC-SR04 거리 → perception.update_distance() 20Hz. 범위 밖이면 None.
+
+    센서/gpiozero 가 없거나 초기화 실패하면 죽지 않고 계속 None 을 보고한다.
+    (배선 안 된 상태에서도 통합·뷰어가 그대로 돌아가게)
+    """
+    try:
+        from gpiozero import DistanceSensor
+        sensor = DistanceSensor(echo=ULTRA_ECHO, trigger=ULTRA_TRIG,
+                                max_distance=ULTRA_MAX_DIST_M)
+    except Exception as e:
+        print(f"[ultrasonic] sensor unavailable ({e}) -> reporting None")
+        while not stop_event.is_set():
+            perception.update_distance(None)
+            time.sleep(ULTRA_PERIOD_S)
+        return
+
     out_of_range = ULTRA_MAX_DIST_M * 0.99
     while not stop_event.is_set():
-        d = sensor.distance                       # 0~max (m)
-        perception.update_distance(None if d >= out_of_range else d)
+        try:
+            d = sensor.distance                   # 0~max (m)
+            perception.update_distance(None if d >= out_of_range else d)
+        except Exception:
+            perception.update_distance(None)      # 읽기 실패 → None
         time.sleep(ULTRA_PERIOD_S)
 
 
@@ -145,7 +160,8 @@ def camera_loop(perception, stop_event, hef_path="yolov11n.hef", debug_view=Fals
                     lane, bev_vis = lane_pipeline.process_view(bgr)
                     perception.update_lane(*lane)
                     _show_debug(cv2, frame_rgb, objects, bev_vis,
-                                lane_pipeline._L.NEAR_ROI_Y0_FRAC)
+                                lane_pipeline._L.NEAR_ROI_Y0_FRAC,
+                                perception._latest["dist_front_m"])   # 초음파 거리(m or None)
                     if (cv2.waitKey(1) & 0xFF) == 27:    # ESC
                         stop_event.set()
                 else:
@@ -157,11 +173,17 @@ def camera_loop(perception, stop_event, hef_path="yolov11n.hef", debug_view=Fals
             cv2.destroyAllWindows()
 
 
-def _show_debug(cv2, frame_rgb, objects, bev_vis, roi_y0_frac):
+def _show_debug(cv2, frame_rgb, objects, bev_vis, roi_y0_frac, dist_m=None):
     """디버그 두 창 렌더 (camera_loop debug_view 전용)."""
     import detect as _d
-    cam_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+    # picamera2 "RGB888" 배열은 실제로 BGR 순서 → cv2/imshow 에 그대로 사용 (변환 금지)
+    cam_bgr = frame_rgb.copy()
     h, w = cam_bgr.shape[:2]
+
+    # 초음파 거리 (화면 상단) — 미연결/범위밖이면 None
+    dist_txt = "ULTRASONIC: None" if dist_m is None else f"ULTRASONIC: {dist_m * 100:.0f} cm"
+    cv2.putText(cam_bgr, dist_txt, (10, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
 
     # 객체 박스 (정규화 Detection → 픽셀 박스 복원 후 detect.draw 재사용)
     px = [(int((o.cx - o.w / 2) * w), int((o.cy - o.h / 2) * h),
