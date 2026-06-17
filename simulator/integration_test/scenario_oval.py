@@ -1,18 +1,29 @@
-"""통합테스트 시나리오 — 타원 트랙 1바퀴 (선행차 LEADER 기준).
+"""통합테스트 시나리오 — 반시계 방향 원형 트랙 1바퀴 (선행차 LEADER 기준).
 
-실제 src/algorithm/decision.py 의 _decide_leader 우선순위(STOP>LANE_CHANGE>SLOW>CRUISE)를
-모두 자극하도록 인지(Scene) 타임라인을 구성한다. 인지는 노이즈 없는 clean 값을 50ms로 재생.
+GUI 가상 트랙(2.5×2.05m, 원형, 반시계 방향) 실제 장애물 배치 기반.
+
+  진행 순서(시계 방향 위치 → 반시계 이동):
+    출발(6시, lane2) → 1차 장애물(9시) → 2차(12시) → 3차(2시) → 4차(4시) → 정지선(6시)
+
+  차선:
+    lane 1 = 내차선 (황선 안쪽, 트랙 내부)
+    lane 2 = 외차선 (황선 바깥쪽, 출발 차선)
+
+  LANE_CHANGE 동작:
+    장애물 감지(front_clear=False) → 반대 차선으로 전환 (결정: decision._decide_leader)
+    lane2→1: 좌조향 steer=-0.5 / lane1→2: 우조향 steer=+0.5 (motion._set_servo)
+    물리 차선 변경 소요: ~2.5s → 인지가 current_lane 업데이트
 
   STEPS:       ScenarioStep(t_ms, param, value) 리스트 (재생 시작 기준 경과 ms)
-  INITIAL:     시작 시 인지 파라미터 (current_lane=2 에서 출발)
+  INITIAL:     시작 상태 (외차선=2, lane_valid, 전방 비어있음)
   DURATION_MS: 총 재생 길이
-  CHECKPOINTS: 시각 구간별 기대값 (verify_scenario 가 측정값과 대조)
+  CHECKPOINTS: 시각 구간(ms) 안에서 CSV 필드가 기대값이어야 함
 
-단위 주의: 인지 내부 param 은 m (lane_offset_m·dist_front_m) — SimPerception 이 ×100 해서 Scene(cm) 로 변환.
+단위 주의: 내부 param = m (lane_offset_m·dist_front_m) — SimPerception 이 ×100 해서 Scene(cm) 로 변환.
 """
-from scenario import ScenarioStep   # simulator/scenario.py (경로는 run/verify 가 잡아줌)
+from scenario import ScenarioStep   # simulator/scenario.py
 
-# ── 출발 상태 — 2차로 직진, 차선 인식 양호, 전방 비어있음 ──────────────
+# ── 출발 상태 — 외차선(2) 출발, 차선 인식 양호, 전방 비어있음 ──────────
 INITIAL = {
     'lane_valid':         True,
     'current_lane':       2,
@@ -24,42 +35,81 @@ INITIAL = {
     'stop_signal':        False,
 }
 
-# ── 타임라인 (재생 시작 기준 ms) ───────────────────────────────────────
+# ── 타임라인 (반시계: 6시→9시→12시→2시→4시→6시 정지선) ──────────────────
+#    장애물 pulse=0.2s / current_lane은 LANE_CHANGE 트리거 +2.5s 후 인지 반영
+#    LANE_CHANGE_HOLD_S=1.5s → in_action 해제 후 최소 0.5s 여유 두고 next 트리거
 STEPS = [
-    # 3.0~5.0s : 타원 커브 진입(곡률만 변화) — 판단은 평소(CRUISE) 유지해야 함
-    ScenarioStep(3000, 'lane_curvature_1pm', 0.8),
-    ScenarioStep(5000, 'lane_curvature_1pm', 0.0),
-    # 6.0~7.0s : 차선 일시 미인식 → SLOW
-    ScenarioStep(6000, 'lane_valid', False),
-    ScenarioStep(7000, 'lane_valid', True),
-    # 8.0s : 전방 장애물 출현(0.2s 펄스) → LANE_CHANGE 트리거 (반대차선=1, hold 1.5s 는 판단이 유지)
-    ScenarioStep(8000, 'front_clear', False),
-    ScenarioStep(8200, 'front_clear', True),
-    # 10.5s : 차선변경 완료 — 인지가 변경 시작(8.0s) +2.5s 후 current_lane 2→1 반영
-    ScenarioStep(10500, 'current_lane', 1),
-    # 12.0s : 정지선(0.2s 펄스) → STOP 트리거 (hold 2.0s 는 판단이 유지)
-    ScenarioStep(12000, 'stop_signal', True),
-    ScenarioStep(12200, 'stop_signal', False),
-]
-DURATION_MS = 16000
+    # 5.0s : 1차 장애물(~9시, 좌측) — lane2 진입 중, front_clear=False 감지
+    #         decision: lane2→target=1, LANE_CHANGE / motion: steer=-0.5(좌조향)
+    ScenarioStep(5000, 'front_clear', False),
+    ScenarioStep(5200, 'front_clear', True),
+    ScenarioStep(7500, 'current_lane', 1),    # 5.0+2.5s : 물리 차선 변경 완료 인지
 
-# ── 검증 체크포인트 — 시각 구간(ms) 안에서 CSV 필드가 기대값이어야 함 ──
-#    win 은 전이 가장자리를 피해 안쪽으로 잡음. 판단 hold: STOP=2.0s, LANE_CHANGE=1.5s.
+    # 10.0s : 2차 장애물(~12시, 상단) — lane1 주행 중, 장애물 재감지
+    #          decision: lane1→target=2, LANE_CHANGE / motion: steer=+0.5(우조향)
+    ScenarioStep(10000, 'front_clear', False),
+    ScenarioStep(10200, 'front_clear', True),
+    ScenarioStep(12500, 'current_lane', 2),   # 10.0+2.5s
+
+    # 16.0s : 3차 장애물(~2시, 우측상단) — lane2 복귀 후 다시 감지
+    #          decision: lane2→target=1, LANE_CHANGE / motion: steer=-0.5(좌조향)
+    ScenarioStep(16000, 'front_clear', False),
+    ScenarioStep(16200, 'front_clear', True),
+    ScenarioStep(18500, 'current_lane', 1),   # 16.0+2.5s
+
+    # 20.0s : 4차 장애물(~4시, 우측하단) — 3차와 근접 배치, lane1 주행 중
+    #          decision: lane1→target=2, LANE_CHANGE / motion: steer=+0.5(우조향)
+    ScenarioStep(20000, 'front_clear', False),
+    ScenarioStep(20200, 'front_clear', True),
+    ScenarioStep(22500, 'current_lane', 2),   # 20.0+2.5s
+
+    # 25.0s : 정지선(~6시, 출발점 도착) — STOP 2.0s hold
+    ScenarioStep(25000, 'stop_signal', True),
+    ScenarioStep(25200, 'stop_signal', False),
+]
+DURATION_MS = 29000
+
+# ── 검증 체크포인트 ── win 단위=ms, 전이 가장자리(±150ms) 제외 ──────────
+#    판단 hold: STOP=2.0s, LANE_CHANGE=1.5s
+#    current_lane: LANE_CHANGE 트리거 +2.5s 후 안정 (여유 100ms 추가)
 CHECKPOINTS = [
-    {'name': '시작 평소주행(CRUISE)',        'win': (200, 2800),    'field': 'behavior',     'expect': 'CRUISE'},
-    {'name': '시작 차로=2',                  'win': (200, 2800),    'field': 'current_lane', 'expect': '2'},
-    {'name': '커브 중 평소 유지(CRUISE)',    'win': (3200, 4800),   'field': 'behavior',     'expect': 'CRUISE'},
-    {'name': '차선 미인식 → SLOW',           'win': (6100, 6900),   'field': 'behavior',     'expect': 'SLOW'},
-    {'name': '차선 복귀 → CRUISE',           'win': (7300, 7900),   'field': 'behavior',     'expect': 'CRUISE'},
-    {'name': '장애물 → LANE_CHANGE',         'win': (8150, 9400),   'field': 'behavior',     'expect': 'LANE_CHANGE'},
-    {'name': 'LANE_CHANGE 목표차로=1',       'win': (8150, 9400),   'field': 'target_lane',  'expect': '1'},
-    {'name': 'LANE_CHANGE 종료 후 CRUISE',   'win': (9700, 10300),  'field': 'behavior',     'expect': 'CRUISE'},
-    {'name': '차선변경 완료(인지 +2.5s)=1',  'win': (10700, 11800), 'field': 'current_lane', 'expect': '1'},
-    {'name': '정지선 → STOP(2s hold)',       'win': (12150, 13800), 'field': 'behavior',     'expect': 'STOP'},
-    {'name': 'STOP 종료 후 CRUISE',          'win': (14300, 15800), 'field': 'behavior',     'expect': 'CRUISE'},
-    # ── 모션 PWM (실제 MotionModule 출력: ego.throttle_pwm 0~1, steer_pwm ±1) ──
-    {'name': 'CRUISE throttle=0.6',          'win': (200, 2800),    'field': 'throttle_pwm', 'expect': '0.6'},
-    {'name': 'SLOW throttle=0.3',            'win': (6100, 6900),   'field': 'throttle_pwm', 'expect': '0.3'},
-    {'name': 'LANE_CHANGE 좌조향 steer=-0.5', 'win': (8150, 9400),   'field': 'steer_pwm',    'expect': '-0.5'},
-    {'name': 'STOP throttle=0.0',            'win': (12150, 13800), 'field': 'throttle_pwm', 'expect': '0.0'},
+    # ── 출발 평소주행 ────────────────────────────────────────────────
+    {'name': '출발 CRUISE',              'win': (200,   4800),  'field': 'behavior',     'expect': 'CRUISE'},
+    {'name': '출발 차로=2(외차선)',       'win': (200,   4800),  'field': 'current_lane', 'expect': '2'},
+
+    # ── 1차 장애물(~9시) lane2→lane1, 좌조향 ──────────────────────
+    {'name': '1차 장애물 LANE_CHANGE',   'win': (5150,  6400),  'field': 'behavior',     'expect': 'LANE_CHANGE'},
+    {'name': '1차LC target=1(내차선)',   'win': (5150,  6400),  'field': 'target_lane',  'expect': '1'},
+    {'name': '1차LC steer=-0.5(좌조향)','win': (5150,  6400),  'field': 'steer_pwm',    'expect': '-0.5'},
+    {'name': '1차LC 후 CRUISE',          'win': (6700,  9800),  'field': 'behavior',     'expect': 'CRUISE'},
+    {'name': '1차LC 완료 차로=1',        'win': (7700,  9800),  'field': 'current_lane', 'expect': '1'},
+
+    # ── 2차 장애물(~12시) lane1→lane2, 우조향 ─────────────────────
+    {'name': '2차 장애물 LANE_CHANGE',   'win': (10150, 11400), 'field': 'behavior',     'expect': 'LANE_CHANGE'},
+    {'name': '2차LC target=2(외차선)',   'win': (10150, 11400), 'field': 'target_lane',  'expect': '2'},
+    {'name': '2차LC steer=+0.5(우조향)','win': (10150, 11400), 'field': 'steer_pwm',    'expect': '0.5'},
+    {'name': '2차LC 후 CRUISE',          'win': (11700, 15800), 'field': 'behavior',     'expect': 'CRUISE'},
+    {'name': '2차LC 완료 차로=2',        'win': (12700, 15800), 'field': 'current_lane', 'expect': '2'},
+
+    # ── 3차 장애물(~2시) lane2→lane1, 좌조향 ──────────────────────
+    {'name': '3차 장애물 LANE_CHANGE',   'win': (16150, 17400), 'field': 'behavior',     'expect': 'LANE_CHANGE'},
+    {'name': '3차LC target=1(내차선)',   'win': (16150, 17400), 'field': 'target_lane',  'expect': '1'},
+    {'name': '3차LC steer=-0.5(좌조향)','win': (16150, 17400), 'field': 'steer_pwm',    'expect': '-0.5'},
+    {'name': '3차LC 후 CRUISE',          'win': (17700, 19800), 'field': 'behavior',     'expect': 'CRUISE'},
+    {'name': '3차LC 완료 차로=1',        'win': (18700, 19800), 'field': 'current_lane', 'expect': '1'},
+
+    # ── 4차 장애물(~4시) lane1→lane2, 우조향 ─────────────────────
+    {'name': '4차 장애물 LANE_CHANGE',   'win': (20150, 21400), 'field': 'behavior',     'expect': 'LANE_CHANGE'},
+    {'name': '4차LC target=2(외차선)',   'win': (20150, 21400), 'field': 'target_lane',  'expect': '2'},
+    {'name': '4차LC steer=+0.5(우조향)','win': (20150, 21400), 'field': 'steer_pwm',    'expect': '0.5'},
+    {'name': '4차LC 후 CRUISE',          'win': (21700, 24800), 'field': 'behavior',     'expect': 'CRUISE'},
+    {'name': '4차LC 완료 차로=2',        'win': (22700, 24800), 'field': 'current_lane', 'expect': '2'},
+
+    # ── 정지선(~6시) ─────────────────────────────────────────────
+    {'name': '정지선 → STOP(2s hold)',   'win': (25150, 26800), 'field': 'behavior',     'expect': 'STOP'},
+    {'name': 'STOP 후 CRUISE',           'win': (27300, 28800), 'field': 'behavior',     'expect': 'CRUISE'},
+
+    # ── 모션 PWM ─────────────────────────────────────────────────
+    {'name': 'CRUISE throttle=0.6',     'win': (200,   4800),  'field': 'throttle_pwm', 'expect': '0.6'},
+    {'name': 'STOP throttle=0.0',       'win': (25150, 26800), 'field': 'throttle_pwm', 'expect': '0.0'},
 ]
