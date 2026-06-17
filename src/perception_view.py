@@ -30,7 +30,8 @@ def _dist_printer(perception, stop_event):
 
 def main():
     ap = argparse.ArgumentParser(description="Perception debug viewer (integrated lane + object + ultrasonic)")
-    ap.add_argument("--hef", default="yolov11n.hef", help="HEF path (default: yolov11n.hef)")
+    ap.add_argument("--hef", default=sensing.HEF_PATH,
+                    help=f"HEF path (default: {sensing.HEF_PATH})")
     args = ap.parse_args()
 
     perception = PerceptionModule()      # update_*() 가 호출되며 _latest 가 채워짐 (버스 발행은 안 함)
