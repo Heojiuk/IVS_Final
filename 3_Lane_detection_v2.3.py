@@ -60,8 +60,9 @@ GREEN_HIGH  = (90, 255, 255)
 # ============================================================
 # Lane-detection tuning
 # ============================================================
-EGO_CENTER_X   = WARP_W // 2
-LANE_WIDTH_PX  = 119        # BEV 측정 한 차로폭(px) — HUD 'lane width' 실측값 (직선구간 재확인 권장)
+EGO_CENTER_X   = 182        # 차 중심선의 BEV 위치(px) — 캘리: 차 자로재서 정확히 중앙일 때 lane_center
+                            #   (WARP_W//2=200 아님 — 카메라가 차 중심서 살짝 우측 장착)
+LANE_WIDTH_PX  = 119        # BEV 측정 한 차로폭(px) — 캘리 페어 119px↔24cm
 NEAR_FIELD_FRAC = 0.5
 CONTROL_Y      = int(WARP_H * 0.90)
 
