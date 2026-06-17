@@ -20,13 +20,12 @@ HEADING_GAIN = 0.5
 
 TARGET_DIST     = 30.0
 KP_DIST         = 0.5
-THROTTLE_NORMAL = 70
-THROTTLE_SLOW   = 40
+THROTTLE_NORMAL = 70   # normal driving speed
+THROTTLE_SLOW   = 40   # slow speed (SLOW behavior)
+THROTTLE_STEER  = 40   # speed limit when steering >= 25deg
 THROTTLE_STOP   = 0
-THROTTLE_STEER  = 40
 
-STEER_THRESHOLD = 25 / 65  # 25도 기준
-
+STEER_THRESHOLD   = 25 / 65  # 25deg threshold out of 65deg max
 LANE_CHANGE_STEER = 0.5
 
 
@@ -90,10 +89,8 @@ class MotionModule:
 
             throttle_pwm = self._calc_throttle(behavior, scene, leader)
 
-            # ±25도 이상 꺾이면 속도 40, 미만이면 70
+            # limit speed to THROTTLE_STEER(40) when steer angle >= 25deg
             if abs(steer_pwm) >= STEER_THRESHOLD:
-                throttle_pwm = min(throttle_pwm, THROTTLE_NORMAL)
-            else:
                 throttle_pwm = min(throttle_pwm, THROTTLE_STEER)
 
         self._set_servo(steer_pwm)
@@ -115,6 +112,7 @@ class MotionModule:
         return max(-1.0, min(1.0, steer))
 
     def _calc_throttle(self, behavior, scene, leader):
+        # follower: leader feedforward + distance P control (CACC)
         if self.role == Role.FOLLOWER and leader is not None:
             base = leader.throttle_pwm * 100.0
             if scene is not None and scene.dist_front_cm is not None:
