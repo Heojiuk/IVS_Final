@@ -92,9 +92,9 @@ class MotionModule:
 
             # ±25도 이상 꺾이면 속도 40, 미만이면 70
             if abs(steer_pwm) >= STEER_THRESHOLD:
-                throttle_pwm = min(throttle_pwm, THROTTLE_STEER)
-            else:
                 throttle_pwm = min(throttle_pwm, THROTTLE_NORMAL)
+            else:
+                throttle_pwm = min(throttle_pwm, THROTTLE_STEER)
 
         self._set_servo(steer_pwm)
         self._set_dc(throttle_pwm)
