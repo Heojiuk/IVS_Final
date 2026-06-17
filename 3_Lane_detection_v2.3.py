@@ -426,7 +426,7 @@ def detect_ego_lane_nearfield(bgr):
     yhist = np.sum(ymask, axis=0).astype(float)        # column sums
     if yhist.max() < NEAR_MIN_SUM:
         return None                                    # no yellow near -> no reading
-
+                                                       # (녹색은 2개라 모호 → 기준 안 씀)
     yellow_x = int(np.argmax(yhist))
     car_x    = w // 2                                  # camera optical axis ~ car center
     return "LEFT" if car_x < yellow_x else "RIGHT"
