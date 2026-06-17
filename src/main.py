@@ -49,12 +49,14 @@ def main():
     ap.add_argument("-r", "-R", "--role", required=True, type=_role,
                     metavar="{leader|l, follower|f}",
                     help="차량 역할 — leader|l 또는 follower|f (대소문자 무관)")  # 기본값 없음 — 역할 누락 방지
+    ap.add_argument("-p", "--peer", default=None, metavar="IP",
+                    help="상대 차량 IP (주면 IVS_MODE/_IPS 무시 — DHCP 대응)")
     args = ap.parse_args()
 
     # ── 주행 시작 전 방어: 조립·소켓 bind·키 로드를 시도하고, 실패하면 raw 트레이스백 대신 명확히 중단 ──
     try:
         bus, modules, v2v = build(args.role)
-        cfg = config.for_role(args.role)
+        cfg = config.for_role(args.role, args.peer)
         key_fp = hashlib.sha256(config.load_key()).hexdigest()[:8]
     except OSError as e:
         print(
