@@ -723,6 +723,11 @@ def draw_hud(img, data):
     cnt  = data.get("ego_switch_cnt", 0)
     put(f"ego-lock: {ego}  near: {near}  switch: {cnt}/{SWITCH_FRAMES}", 6)
 
+    # [CAL] 차로중앙 px vs EGO_CENTER_X — 차 정확히 중앙일 때 이 lane_center 값을 EGO_CENTER_X로
+    cx = data.get("ego_lane_center_px")
+    cx_txt = "--" if cx is None else f"{cx:.0f}"
+    put(f"lane_center: {cx_txt}px   EGO_CENTER_X: {EGO_CENTER_X}", 7)
+
 
 # ============================================================
 # main  -- two call-sites use the v2 functions
