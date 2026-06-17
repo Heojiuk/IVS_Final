@@ -25,7 +25,7 @@ _PORTS = {
 # ── 모드별 차량 IP ─────────────────────────────────────────────────────
 _IPS = {
     "release": {"leader": "192.168.0.11", "follower": "192.168.0.12"},      # 문서 대역(실차)
-    "dev": {"leader": "192.168.202.91", "follower": "192.168.203.237"},     # 강의실 WiFi (실측 후 갱신 또는 실행 시 --peer 로 직접 지정)
+    "dev": {"leader": "192.168.202.91", "follower": "192.168.201.102"},     # 강의실 WiFi (실측 후 갱신 또는 실행 시 --peer 로 직접 지정)
     "loopback": {"leader": "127.0.0.1", "follower": "127.0.0.1"},           # 단일 PC 테스트
 }
 
@@ -34,7 +34,7 @@ _DEV_KEY = b"DEVKEY-INSECURE-CHANGE-ME-32BYTE"  # 32B 개발용. 운영 전 psk.
 
 def mode() -> str:
     """현재 IP 모드 (환경변수 IVS_MODE, 기본 release).  파라미터 없음"""
-    m = os.environ.get("IVS_MODE", "release").lower()
+    m = os.environ.get("IVS_MODE", "dev").lower()
     if m not in _IPS:
         raise ValueError(f"unknown IVS_MODE={m!r} (use release|dev|loopback)")
     return m

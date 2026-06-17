@@ -13,7 +13,7 @@ def _make_bin(tmp_path, n=3):
     path = os.path.join(tmp_path, 'session.bin')
     with open(path, 'wb') as f:
         for i in range(n):
-            ego = EgoState(stamp=float(i), throttle_pwm=0.1*i, steer_pwm=-0.05*i, behavior=DriveBehavior.FOLLOW)
+            ego = EgoState(stamp=float(i), throttle_pwm=0.1*i, steer_pwm=-0.05*i, behavior=DriveBehavior.CRUISE)
             f.write(packet_generator(ego, lane=1, role=Role.LEADER, seq=i, key=KEY))
     return path
 
@@ -33,7 +33,7 @@ def test_convert_produces_csv(tmp_path):
 def test_convert_skips_bad_packets(tmp_path):
     bin_path = os.path.join(tmp_path, 'bad.bin')
     with open(bin_path, 'wb') as f:
-        ego = EgoState(stamp=1.0, throttle_pwm=0.5, behavior=DriveBehavior.FOLLOW)
+        ego = EgoState(stamp=1.0, throttle_pwm=0.5, behavior=DriveBehavior.CRUISE)
         f.write(packet_generator(ego, 1, Role.LEADER, 1, KEY))
         f.write(bytes(60))  # garbage packet
     count = convert_bin_to_csv(bin_path, os.path.join(tmp_path, 'out.csv'), key=KEY)

@@ -15,13 +15,22 @@ class VILSEngine:
     on_packet_cb: called with raw 60B bytes for each verified RX packet
     """
 
-    def __init__(self, role, on_packet_cb=None):
+    def __init__(self, role, on_packet_cb=None, on_hmac_fail_cb=None,
+                 on_tx_cb=None, use_local_control=True):
         self._bus = MessageBus()
-        self._v2v = RecordableV2VModule(role, on_packet_cb)
+        self._v2v = RecordableV2VModule(role, on_packet_cb, on_hmac_fail_cb, on_tx_cb)
         # DecisionModule and MotionModule expect Role enum, not a string
         role_enum = Role.LEADER if role == "leader" else Role.FOLLOWER
-        self._decision = DecisionModule(role_enum)
-        self._motion = MotionModule(role_enum)
+        # 판단·모션: 로컬 추종 제어(기본) ↔ 실제 src 모듈(브리지). 타 팀 구현 완료 시 False 로 전환.
+        self._use_local_control = use_local_control
+        if use_local_control:
+            from sim_algorithm.decision import LocalDecisionModule
+            from sim_algorithm.motion_planning import LocalMotionModule
+            self._decision = LocalDecisionModule(role_enum)
+            self._motion = LocalMotionModule(role_enum)
+        else:
+            self._decision = DecisionModule(role_enum)   # 타 팀 STUB (현재 PWM 0)
+            self._motion = MotionModule(role_enum)
         self._started = False
         self._sim_perception = None
 
