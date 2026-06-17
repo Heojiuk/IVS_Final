@@ -11,7 +11,7 @@ from core_module.bus import Topics
 from messages import DriveCommand, ModeCmd, DriveBehavior, Mode, Role
 
 # ── 선행차 판단 임계값 ───────────────────────────────────────────────
-SAFE_FRONT_DIST_M = 0.5  # 앞 장애물 감지 거리(m) — 이 이내면 LANE_CHANGE 트리거 (RC카 실측 후 튜닝 TODO)
+SAFE_FRONT_DIST_CM = 50  # 앞 장애물 감지 거리(cm) — 이 이내면 LANE_CHANGE 트리거 (RC카 실측 후 튜닝 TODO)
 STOP_HOLD_S = 2.0  # STOP 진입 후 최소 유지 시간(초) — 정지선 hold + 채터링 방지
 LANE_CHANGE_HOLD_S = 1.5  # LANE_CHANGE 동작 유지 시간(초) — 끝나면 차선 변경 완료로 간주
 
@@ -47,7 +47,7 @@ class DecisionModule:
     # ── 역할별 판단 로직 (각 라즈베리파이는 자기 역할 함수만 사용) ──────
     def _decide_leader(self, scene, link, peer):
         """선행차 판단 — 정지선·첫사이클은 STOP, 앞에 차/장애물 보이면 반대 차선으로 LANE_CHANGE.
-        우선순위(위가 이김): STOP > LANE_CHANGE > SLOW(차선 미인식) > FOLLOW(평소)
+        우선순위(위가 이김): STOP > LANE_CHANGE > SLOW(차선 미인식) > CRUISE(평소)
         반환: (DriveCommand, ModeCmd)
         """
         now = time.monotonic()
@@ -59,7 +59,7 @@ class DecisionModule:
 
         # ② 장애물 감지 → LANE_CHANGE 트리거 (반대 차선으로 토글)
         obstacle_in_lane = scene_valid and (
-            not scene.front_clear or (scene.dist_front_m is not None and scene.dist_front_m < SAFE_FRONT_DIST_M)
+            not scene.front_clear or (scene.dist_front_cm is not None and scene.dist_front_cm < SAFE_FRONT_DIST_CM)
         )
         # 이미 STOP 중·LANE_CHANGE 중이면 중복 트리거 방지
         in_action = now < self._stop_until or now < self._lane_change_until
@@ -79,7 +79,7 @@ class DecisionModule:
             behavior = DriveBehavior.SLOW  # 차선 못 찾음
             target_lane = 0
         else:
-            behavior = DriveBehavior.FOLLOW  # 평소
+            behavior = DriveBehavior.CRUISE  # 평소
             target_lane = 0
 
         command = DriveCommand(stamp=now, behavior=behavior, target_lane=target_lane)
@@ -95,6 +95,6 @@ class DecisionModule:
         # peer = 선행 상태(LEADER_STATE) — link.state 확인 후 추종에 반영
         # TODO(follower-mode):     scene·link 로 mode 결정 (link LOST → DEGRADED 등)
         # TODO(follower-behavior): peer.throttle_pwm·steer_pwm·behavior 참고 + 차선 보정
-        command = DriveCommand(stamp=time.monotonic(), behavior=DriveBehavior.FOLLOW)  # ← 지금은 더미값
+        command = DriveCommand(stamp=time.monotonic(), behavior=DriveBehavior.CRUISE)  # ← 지금은 더미값
         mode = ModeCmd(stamp=time.monotonic(), mode=Mode.NORMAL)  # ← 지금은 더미값
         return command, mode
