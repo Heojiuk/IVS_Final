@@ -18,14 +18,11 @@ MOTOR_FORWARD, MOTOR_BACKWARD, MOTOR_ENABLE = 5, 6, 13
 OFFSET_GAIN  = 1.0
 HEADING_GAIN = 0.5
 
-TARGET_DIST     = 30.0
-KP_DIST         = 0.5
-THROTTLE_NORMAL = 70   # normal driving speed
-THROTTLE_SLOW   = 40   # slow speed (SLOW behavior)
-THROTTLE_STEER  = 40   # speed limit when steering >= 25deg
+THROTTLE_NORMAL = 70
+THROTTLE_STEER  = 40
 THROTTLE_STOP   = 0
 
-STEER_THRESHOLD   = 25 / 65  # 25deg threshold out of 65deg max
+STEER_THRESHOLD   = 25 / 65
 LANE_CHANGE_STEER = 0.5
 
 
@@ -67,7 +64,7 @@ class MotionModule:
             steer_pwm    = 0.0
 
         elif mode is not None and mode.mode == Mode.DEGRADED:
-            throttle_pwm = THROTTLE_SLOW
+            throttle_pwm = THROTTLE_STEER
             if mode.cause == ModeCause.LANE_LOST:
                 steer_pwm = 0.0
             elif mode.cause == ModeCause.OBSTACLE:
@@ -76,22 +73,27 @@ class MotionModule:
                 steer_pwm = self._calc_steer(scene)
 
         else:
-            if behavior == DriveBehavior.LANE_CHANGE:
-                if scene is not None and scene.current_lane != target_lane:
-                    if target_lane == 1:
-                        steer_pwm = -LANE_CHANGE_STEER
-                    elif target_lane == 2:
-                        steer_pwm = LANE_CHANGE_STEER
+            if behavior == DriveBehavior.STOP:
+                throttle_pwm = THROTTLE_STOP
+                steer_pwm    = 0.0
+
+            else:
+                if behavior == DriveBehavior.LANE_CHANGE:
+                    if scene is not None and scene.current_lane != target_lane:
+                        if target_lane == 1:
+                            steer_pwm = -LANE_CHANGE_STEER
+                        elif target_lane == 2:
+                            steer_pwm = LANE_CHANGE_STEER
+                    else:
+                        steer_pwm = self._calc_steer(scene)
                 else:
                     steer_pwm = self._calc_steer(scene)
-            else:
-                steer_pwm = self._calc_steer(scene)
 
-            throttle_pwm = self._calc_throttle(behavior, scene, leader)
-
-            # limit speed to THROTTLE_STEER(40) when steer angle >= 25deg
-            if abs(steer_pwm) >= STEER_THRESHOLD:
-                throttle_pwm = min(throttle_pwm, THROTTLE_STEER)
+                # speed control based on steer angle
+                if abs(steer_pwm) >= STEER_THRESHOLD:
+                    throttle_pwm =THROTTLE_NORMAL    # 40 when steer >= 25deg
+                else:
+                    throttle_pwm = THROTTLE_STEER   # 70 when steer < 25deg
 
         self._set_servo(steer_pwm)
         self._set_dc(throttle_pwm)
@@ -110,25 +112,6 @@ class MotionModule:
             return 0.0
         steer = OFFSET_GAIN * scene.lane_offset_cm + HEADING_GAIN * scene.lane_heading_rad
         return max(-1.0, min(1.0, steer))
-
-    def _calc_throttle(self, behavior, scene, leader):
-        # follower: leader feedforward + distance P control (CACC)
-        if self.role == Role.FOLLOWER and leader is not None:
-            base = leader.throttle_pwm * 100.0
-            if scene is not None and scene.dist_front_cm is not None:
-                dist_err = scene.dist_front_cm - TARGET_DIST
-                throttle = base + KP_DIST * dist_err * 100.0
-                return max(0, min(100, throttle))
-            return max(0, min(100, base))
-
-        if behavior == DriveBehavior.STOP:
-            return THROTTLE_STOP
-        elif behavior == DriveBehavior.SLOW:
-            return THROTTLE_SLOW
-        elif behavior in (DriveBehavior.CRUISE, DriveBehavior.LANE_CHANGE):
-            return THROTTLE_NORMAL
-        else:
-            return THROTTLE_NORMAL
 
     def _set_servo(self, steer_pwm):
         if self._servo is None:
@@ -156,4 +139,5 @@ class MotionModule:
             self._dc_pwm.ChangeDutyCycle(0)
             GPIO.output(MOTOR_FORWARD,  GPIO.LOW)
             GPIO.output(MOTOR_BACKWARD, GPIO.LOW)
+
 
