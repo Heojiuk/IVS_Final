@@ -44,13 +44,14 @@ class PerceptionModule:
         self._threads = []
 
     # ===== 센서 스레드 기동/정지 (라즈베리파이 전용) =====================
-    def start(self, hef_path="yolov11n.hef"):
-        """카메라(차선+YOLO)·초음파 스레드를 띄운다. 하드웨어 import는 여기서 지연 로딩."""
+    def start(self):
+        """카메라(차선+YOLO)·초음파 스레드를 띄운다. 하드웨어 import는 여기서 지연 로딩.
+        HEF 경로는 sensing.HEF_PATH 고정값 사용 (명령어 인자 없음)."""
         from algorithm import sensing
         self._stop = threading.Event()
         self._threads = [
             threading.Thread(target=sensing.camera_loop,
-                             args=(self, self._stop, hef_path), daemon=True),
+                             args=(self, self._stop), daemon=True),
             threading.Thread(target=sensing.ultrasonic_loop,
                              args=(self, self._stop), daemon=True),
         ]
