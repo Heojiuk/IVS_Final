@@ -27,7 +27,7 @@ def test_roundtrip():
 
 
 def test_tamper_rejected():
-    pkt = bytearray(packet_generator(EgoState(throttle_pwm=0.5, behavior=DriveBehavior.FOLLOW), 1, Role.FOLLOWER, 1, KEY))
+    pkt = bytearray(packet_generator(EgoState(throttle_pwm=0.5, behavior=DriveBehavior.CRUISE), 1, Role.FOLLOWER, 1, KEY))
     pkt[9] ^= 0xFF                              # 본문 1바이트 변조
     try:
         packet_parser(bytes(pkt), KEY)

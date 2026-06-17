@@ -34,10 +34,21 @@ def build(role):
     return bus, modules, v2v
 
 
+def _role(s):
+    """역할 인자 정규화 — l/leader, f/follower (대소문자 무관) → 'leader'|'follower'."""
+    m = {"l": "leader", "leader": "leader", "f": "follower", "follower": "follower"}
+    key = s.strip().lower()
+    if key not in m:
+        raise argparse.ArgumentTypeError("role must be leader|l or follower|f")
+    return m[key]
+
+
 def main():
-    """진입점 — --role 파싱 → 기동 전 조립·소켓·키 검증(실패 시 깔끔히 중단) → 스케줄러 실행(Ctrl+C까지)."""
+    """진입점 — -r/--role 파싱 → 기동 전 조립·소켓·키 검증(실패 시 깔끔히 중단) → 스케줄러 실행(Ctrl+C까지)."""
     ap = argparse.ArgumentParser(description="IVS V2V platooning node")
-    ap.add_argument("--role", choices=["leader", "follower"], required=True)  # 기본값 없음 — 역할 누락/중복 방지
+    ap.add_argument("-r", "-R", "--role", required=True, type=_role,
+                    metavar="{leader|l, follower|f}",
+                    help="차량 역할 — leader|l 또는 follower|f (대소문자 무관)")  # 기본값 없음 — 역할 누락 방지
     args = ap.parse_args()
 
     # ── 주행 시작 전 방어: 조립·소켓 bind·키 로드를 시도하고, 실패하면 raw 트레이스백 대신 명확히 중단 ──
