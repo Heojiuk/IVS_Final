@@ -61,7 +61,7 @@ GREEN_HIGH  = (90, 255, 255)
 # Lane-detection tuning
 # ============================================================
 EGO_CENTER_X   = WARP_W // 2
-LANE_WIDTH_PX  = 150
+LANE_WIDTH_PX  = 119        # BEV 측정 한 차로폭(px) — HUD 'lane width' 실측값 (직선구간 재확인 권장)
 NEAR_FIELD_FRAC = 0.5
 CONTROL_Y      = int(WARP_H * 0.90)
 
@@ -79,8 +79,8 @@ OVERLAY_ALPHA  = 0.45
 # ============================================================
 # [v2.1] Metric conversion (for heading scale + curvature in 1/m)
 # ============================================================
-REAL_LANE_WIDTH_M = 0.30                          # MEASURE on track! real lane width (m)
-M_PER_PX_X = REAL_LANE_WIDTH_M / LANE_WIDTH_PX     # horizontal scale (m/px)
+REAL_LANE_WIDTH_M = 0.24                          # 실측: 한 차로폭(차선 라인 포함) 0.24m
+M_PER_PX_X = REAL_LANE_WIDTH_M / LANE_WIDTH_PX     # horizontal scale (m/px) = 0.24/119 ~ 0.00202
 M_PER_PX_Y = M_PER_PX_X                            # vertical scale; set from BEV depth if anisotropic
 
 # [F4] curvature gate: reject fits sharper than the track's min radius (blow-ups)
