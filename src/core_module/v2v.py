@@ -89,9 +89,9 @@ def packet_parser(pkt, key):
 
 # ── 통신 모듈 (V2V) ───────────────────────────────────────────────────
 class V2VModule:
-    def __init__(self, role):
-        """통신 모듈 초기화 — 역할별 포트로 송수신 소켓을 열고 RX 스레드를 준비한다.  role='leader'|'follower'(자차 역할)"""
-        cfg = config.for_role(role)
+    def __init__(self, role, peer_ip=None):
+        """통신 모듈 초기화 — 역할별 포트로 송수신 소켓을 열고 RX 스레드를 준비한다.  role='leader'|'follower'(자차 역할), peer_ip=상대 IP(주면 _IPS 무시 — --peer)"""
+        cfg = config.for_role(role, peer_ip)
         self._role = Role.LEADER if role == "leader" else Role.FOLLOWER
         self._key = config.load_key()
         self._peer = (cfg["peer_ip"], cfg["peer_port"])

@@ -25,7 +25,7 @@ def test_loopback_exchange():
 
     # 각 노드가 송신할 자차 상태를 버스에 올림 (없으면 step()이 송신 안 함)
     lead_bus.publish(Topics.EGO_STATE,
-                     EgoState(stamp=1.0, throttle_pwm=0.42, steer_pwm=-0.15, behavior=DriveBehavior.FOLLOW))
+                     EgoState(stamp=1.0, throttle_pwm=0.42, steer_pwm=-0.15, behavior=DriveBehavior.CRUISE))
     foll_bus.publish(Topics.EGO_STATE,
                      EgoState(stamp=2.0, throttle_pwm=0.30, steer_pwm=0.05, behavior=DriveBehavior.SLOW))
     lead_bus.publish(Topics.SCENE, Scene(current_lane=1))   # 선행 1차로 → 패킷에 실림
@@ -47,7 +47,7 @@ def test_loopback_exchange():
 
         assert ls is not None, "후행이 선행 STATE 미수신"
         assert fs is not None, "선행이 후행 STATE 미수신"
-        assert ls.role == Role.LEADER and abs(ls.throttle_pwm - 0.42) < 1e-6 and ls.behavior == DriveBehavior.FOLLOW and ls.lane == 1
+        assert ls.role == Role.LEADER and abs(ls.throttle_pwm - 0.42) < 1e-6 and ls.behavior == DriveBehavior.CRUISE and ls.lane == 1
         assert fs.role == Role.FOLLOWER and abs(fs.throttle_pwm - 0.30) < 1e-6 and fs.behavior == DriveBehavior.SLOW and fs.lane == 2
         assert ls.t_rx > 0 and fs.t_rx > 0, "수신시각 t_rx 미기록"
         assert ls.seq >= 1 and fs.seq >= 1, "seq 미증가"

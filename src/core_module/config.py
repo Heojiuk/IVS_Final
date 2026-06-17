@@ -25,7 +25,7 @@ _PORTS = {
 # ── 모드별 차량 IP ─────────────────────────────────────────────────────
 _IPS = {
     "release": {"leader": "192.168.0.11", "follower": "192.168.0.12"},      # 문서 대역(실차)
-    "dev": {"leader": "192.168.202.91", "follower": "192.168.203.237"},     # 강의실 WiFi (실측 — 실제 Pi 배정에 맞게 확인, 다르면 두 줄 swap)
+    "dev": {"leader": "192.168.202.91", "follower": "192.168.203.237"},     # 강의실 WiFi (실측 후 갱신 또는 실행 시 --peer 로 직접 지정)
     "loopback": {"leader": "127.0.0.1", "follower": "127.0.0.1"},           # 단일 PC 테스트
 }
 
@@ -40,16 +40,19 @@ def mode() -> str:
     return m
 
 
-def for_role(role: str) -> dict:
-    """역할별 V2V 설정 {rx_port, peer_port, peer_ip} 반환. peer_ip = 현재 모드의 '상대 역할' IP.  role='leader'|'follower'"""
+def for_role(role: str, peer_ip: str = None) -> dict:
+    """역할별 V2V 설정 {rx_port, peer_port, peer_ip} 반환.  role='leader'|'follower'
+    peer_ip 주면 그 IP를 상대로 사용(IVS_MODE/_IPS 무시 — DHCP 대응), 없으면 현재 모드의 '상대 역할' IP.
+    (내 rx_port는 역할이 정함, 내 IP는 0.0.0.0 수신이라 불필요 — peer IP만 있으면 됨)"""
     if role not in _PORTS:
         raise ValueError(f"unsupported role: {role} (leader|follower)")
-    ips = _IPS[mode()]
-    peer = "follower" if role == "leader" else "leader"  # 상대 역할
+    if peer_ip is None:
+        peer = "follower" if role == "leader" else "leader"  # 상대 역할 (포트는 _PORTS, IP는 _IPS)
+        peer_ip = _IPS[mode()][peer]
     return {
         "rx_port": _PORTS[role]["rx_port"],
         "peer_port": _PORTS[role]["peer_port"],
-        "peer_ip": ips[peer],
+        "peer_ip": peer_ip,
     }
 
 

@@ -77,7 +77,7 @@ python tests/test_v2v.py            # STATE 코덱 왕복·위변조 테스트
 **S-1 군집 형성·지속 주행** — 차선 따라 자율주행
 ```
 인지  차선 인식                ─scene→
-판단  행동=추종                ─command, mode→
+판단  행동=크루즈              ─command, mode→
 주행  Pure Pursuit·구동 PWM    ─ego_state→ (GPIO/PWM)
 통신  STATE 송신
 ```
@@ -86,7 +86,7 @@ python tests/test_v2v.py            # STATE 코덱 왕복·위변조 테스트
 ```
 [rx]  V2V 수신                ─leader_state, link_status→ (버스 기록, 비동기)
 인지  차선 인식                ─scene→
-판단  read leader·link         ─command(행동=추종)→
+판단  read leader·link         ─command(행동=크루즈)→
 주행  초음파 거리 보정(듀티)     ─ego_state→
 통신  STATE 송신
 ```
