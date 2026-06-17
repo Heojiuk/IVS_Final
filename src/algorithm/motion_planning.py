@@ -1,4 +1,5 @@
 import time
+
 from core_module.bus import Topics
 from messages import EgoState, DriveBehavior, Mode, ModeCause, Role
 
@@ -11,17 +12,20 @@ except ImportError:
     pass
 
 SERVO_PIN                        = 12
-SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 30, 45
+SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 65, 65
 MOTOR_FORWARD, MOTOR_BACKWARD, MOTOR_ENABLE = 5, 6, 13
 
 OFFSET_GAIN  = 1.0
 HEADING_GAIN = 0.5
 
-TARGET_DIST     = 0.3
+TARGET_DIST     = 30.0
 KP_DIST         = 0.5
-THROTTLE_NORMAL = 60
-THROTTLE_SLOW   = 30
+THROTTLE_NORMAL = 70
+THROTTLE_SLOW   = 40
 THROTTLE_STOP   = 0
+THROTTLE_STEER  = 40
+
+STEER_THRESHOLD = 25 / 65  # 25도 기준
 
 LANE_CHANGE_STEER = 0.5
 
@@ -79,14 +83,18 @@ class MotionModule:
                         steer_pwm = -LANE_CHANGE_STEER
                     elif target_lane == 2:
                         steer_pwm = LANE_CHANGE_STEER
-                    else:
-                        steer_pwm = self._calc_steer(scene)
                 else:
                     steer_pwm = self._calc_steer(scene)
             else:
                 steer_pwm = self._calc_steer(scene)
 
             throttle_pwm = self._calc_throttle(behavior, scene, leader)
+
+            # ±25도 이상 꺾이면 속도 40, 미만이면 70
+            if abs(steer_pwm) >= STEER_THRESHOLD:
+                throttle_pwm = min(throttle_pwm, THROTTLE_STEER)
+            else:
+                throttle_pwm = min(throttle_pwm, THROTTLE_NORMAL)
 
         self._set_servo(steer_pwm)
         self._set_dc(throttle_pwm)
