@@ -15,22 +15,21 @@ except ImportError:
 
 
 SERVO_PIN                        = 12
-SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 55, 55
+SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 30, 30
 MOTOR_FORWARD, MOTOR_BACKWARD, MOTOR_ENABLE = 5, 6, 13
 
 
-OFFSET_GAIN   = 0.7
-HEADING_GAIN  = 0.7
-MAX_OFFSET_CM = 12.0  # measured max offset for normalization
+OFFSET_GAIN  = 1.0
+HEADING_GAIN = 1.0
 
 
-THROTTLE_NORMAL   = 65
-THROTTLE_STEER    = 65
-THROTTLE_STOP     = 0
+THROTTLE_NORMAL = 50
+THROTTLE_STEER  = 50
+THROTTLE_STOP   = 0
 
 
-STEER_THRESHOLD   = 10 / 40
-LANE_CHANGE_STEER = 0.7
+STEER_THRESHOLD   = 30 / 40
+LANE_CHANGE_STEER = 0.9
 
 
 
@@ -107,10 +106,11 @@ class MotionModule:
                     steer_pwm = self._calc_steer(scene)
 
 
+                # speed control based on steer angle
                 if abs(steer_pwm) >= STEER_THRESHOLD:
-                    throttle_pwm = THROTTLE_NORMAL
+                    throttle_pwm =THROTTLE_NORMAL    
                 else:
-                    throttle_pwm = THROTTLE_STEER
+                    throttle_pwm = THROTTLE_STEER  
 
 
         self._set_servo(steer_pwm)
@@ -131,9 +131,7 @@ class MotionModule:
     def _calc_steer(self, scene):
         if scene is None or not scene.lane_valid:
             return 0.0
-        # normalize offset_cm to prevent saturation
-        offset_norm = scene.lane_offset_cm / MAX_OFFSET_CM
-        steer = OFFSET_GAIN * offset_norm + HEADING_GAIN * scene.lane_heading_rad
+        steer = OFFSET_GAIN * scene.lane_offset_cm + HEADING_GAIN * scene.lane_heading_rad
         return max(-1.0, min(1.0, steer))
 
 
@@ -164,4 +162,11 @@ class MotionModule:
             self._dc_pwm.ChangeDutyCycle(0)
             GPIO.output(MOTOR_FORWARD,  GPIO.LOW)
             GPIO.output(MOTOR_BACKWARD, GPIO.LOW)
+
+
+
+
+
+
+
 
