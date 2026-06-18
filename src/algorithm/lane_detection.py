@@ -61,6 +61,7 @@ GREEN_HIGH  = (90, 255, 255)
 EGO_CENTER_X   = 201        # 차 중심선의 BEV 위치(px) — 캘리: 차 자로재서 정확히 중앙일 때 lane_center
                             #   (광각 재캘리 — 중앙 −1.5cm 편향 보정 207→201)
 LANE_WIDTH_PX  = 100        # BEV 측정 한 차로폭(px) — 광각 재캘리 100px↔24cm
+GREEN_FOLLOW_BIAS_PX = 12   # 노란선 없어 초록선 추종 시 차로중심보다 '안쪽(중앙선 쪽)'으로 더 당김(px). 아웃코스 방지. 0=정중앙
 NEAR_FIELD_FRAC = 0.5
 CONTROL_Y      = int(WARP_H * 0.97)   # 측정 기준행 — 차에 더 가깝게 (BEV 최하단 근처)
 
@@ -470,12 +471,14 @@ def center_fit(markings, ego_lane):
             return (lg + y) / 2.0 if lg is not None else _shift(y, -half)
         return (y + rg) / 2.0 if rg is not None else _shift(y, +half)
 
-    # 2) 노란선 없음: held ego + 보이는 green 바깥경계에서 half 안쪽으로
+    # 2) 노란선 없음: held ego + green 바깥경계에서 '안쪽(중앙선 쪽)'으로 half+bias 만큼
+    #    (bias = 차로중심보다 더 안쪽으로 당겨 곡선 아웃코스 방지)
     greens = [g for g in (lg, rg) if g is not None]
     if greens:
+        inset = half + GREEN_FOLLOW_BIAS_PX
         if ego_lane == "RIGHT":
-            return _shift(max(greens, key=lambda f: poly_x(f, CONTROL_Y)), -half)
-        return _shift(min(greens, key=lambda f: poly_x(f, CONTROL_Y)), +half)
+            return _shift(max(greens, key=lambda f: poly_x(f, CONTROL_Y)), -inset)
+        return _shift(min(greens, key=lambda f: poly_x(f, CONTROL_Y)), +inset)
 
     return None
 
