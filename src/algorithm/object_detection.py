@@ -295,7 +295,6 @@ def main(hef_path):
 
     try:
         from picamera2 import Picamera2
-        from libcamera import Transform
     except ImportError:
         print("[ERROR] picamera2 not found.")
         print("  sudo apt install -y python3-picamera2")
@@ -320,8 +319,7 @@ def main(hef_path):
     cfg = cam.create_video_configuration(
         main={"size": (CAMERA_W, CAMERA_H), "format": "RGB888"},
         controls={"FrameRate": 30},
-        transform=Transform(hflip=1, vflip=1),
-    )
+    )                                            # 카메라 정방향 장착 → 회전(hflip/vflip) 없음
     cam.configure(cfg)
     cam.start()
     print("[INFO] Camera started. Press 'q' to quit.")

@@ -36,11 +36,11 @@ PREVIEW_SIZE     = (640, 360)
 POINTS_REF_SIZE  = (1280, 720)
 FRAME_RATE       = 40
 
-SRC_POINTS = [
-    [369, 325],
-    [1129, 334],
-    [860, 177],
-    [501, 174],
+SRC_POINTS = [          # 광각(CM3 Wide) 재캘리 — POINTS_REF_SIZE(1280x720) 좌표계
+    [1,    631],        # bottom-left
+    [1234, 639],        # bottom-right
+    [825,  404],        # top-right
+    [429,  401],        # top-left
 ]
 
 WARP_W    = 400

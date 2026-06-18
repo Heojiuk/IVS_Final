@@ -126,7 +126,6 @@ def camera_loop(perception, stop_event, hef_path=HEF_PATH, debug_view=False):
     """
     import cv2
     from picamera2 import Picamera2
-    from libcamera import Transform
     from algorithm import lane_pipeline
 
     cam = Picamera2()
@@ -135,8 +134,7 @@ def camera_loop(perception, stop_event, hef_path=HEF_PATH, debug_view=False):
         lores={"size": LORES_SIZE, "format": "YUV420"},
         raw={"size": RAW_SIZE},                 # 풀 FOV 고정 (차선 BEV 캘리와 동일 화각)
         controls={"FrameRate": FRAME_RATE},
-        transform=Transform(hflip=1, vflip=1),
-    )
+    )                                            # 카메라 정방향 장착 → 회전(hflip/vflip) 없음
     cam.configure(cfg)
     cam.start()
 
