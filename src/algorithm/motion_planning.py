@@ -15,12 +15,12 @@ except ImportError:
 
 
 SERVO_PIN                        = 12
-SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 50, 50
+SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 55, 55
 MOTOR_FORWARD, MOTOR_BACKWARD, MOTOR_ENABLE = 5, 6, 13
 
 
-OFFSET_GAIN    = 1.0
-HEADING_GAIN   = 1.0
+OFFSET_GAIN    = 0.7
+HEADING_GAIN   = 0.7
 MAX_OFFSET_CM  = 12.0
 
 
@@ -188,7 +188,7 @@ class MotionModule:
         else:
             self._dc_pwm.ChangeDutyCycle(0)
             GPIO.output(MOTOR_FORWARD,  GPIO.LOW)
-            GPIO.output(MOTOR_BACKWARD,
+            GPIO.output(MOTOR_BACKWARD, GPIO.LOW) # 수정 완료된 부분
 
 
 
