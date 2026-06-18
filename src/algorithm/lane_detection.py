@@ -447,49 +447,37 @@ def _shift(fit, dx):
     return c
 
 
-def estimate_yellow_fit(markings):
-    """
-    [F1] Estimate the yellow (center divider) polynomial from whatever is visible.
-    Structure: left_green | W | yellow | W | right_green  (W = LANE_WIDTH_PX, fixed).
-      yellow present        -> yellow
-      both greens           -> midpoint of the two greens
-      left green only       -> left_green + W   (yellow is one lane to its right)
-      right green only      -> right_green - W
-      nothing               -> None
-    """
-    y, lg, rg = markings["yellow"], markings["left_green"], markings["right_green"]
-    W = LANE_WIDTH_PX
-    if y is not None:
-        return y
-    if lg is not None and rg is not None:
-        return (lg + rg) / 2.0
-    if lg is not None:
-        return _shift(lg, +W)
-    if rg is not None:
-        return _shift(rg, -W)
-    return None
-
-
 def center_fit(markings, ego_lane):
     """
-    Lane-center polynomial for the requested lane, from ANY visible markings.
-      - Both real boundaries of the lane visible -> average them (most accurate).
-      - Otherwise -> estimate yellow (estimate_yellow_fit) and shift half a lane width
-        toward the lane center. LEFT center sits LEFT of yellow (-), RIGHT (+).
-    Returns ndarray of coeffs [A, B, C] or None (no markings at all).
+    (held) ego 차로의 중앙선 폴리핏. 구조: green | lane | yellow | lane | green.
+
+    1) 노란선 보이면 — 노란선 기준 (가장 신뢰):
+         RIGHT: (yellow + right_green)/2,  green 없으면 yellow + half
+         LEFT : (left_green + yellow)/2,   green 없으면 yellow - half
+    2) 노란선 없으면 (곡선서 시야 밖 등) — 차로는 못 바꿨으니 held ego 유효:
+         RIGHT: 보이는 green 중 '오른쪽 경계'(max x) - half  → 중심은 그 왼쪽
+         LEFT : 보이는 green 중 '왼쪽 경계'(min x)  + half  → 중심은 그 오른쪽
+    Returns ndarray [A,B,C] or None.
     """
     y, lg, rg = markings["yellow"], markings["left_green"], markings["right_green"]
     half = LANE_WIDTH_PX / 2.0
-
-    if ego_lane == "LEFT" and y is not None and lg is not None:
-        return (lg + y) / 2.0
-    if ego_lane == "RIGHT" and y is not None and rg is not None:
-        return (y + rg) / 2.0
-
-    y_est = estimate_yellow_fit(markings)
-    if y_est is None:
+    if ego_lane not in ("LEFT", "RIGHT"):
         return None
-    return _shift(y_est, -half if ego_lane == "LEFT" else +half)
+
+    # 1) 노란선 보이면 노란선 기준
+    if y is not None:
+        if ego_lane == "LEFT":
+            return (lg + y) / 2.0 if lg is not None else _shift(y, -half)
+        return (y + rg) / 2.0 if rg is not None else _shift(y, +half)
+
+    # 2) 노란선 없음: held ego + 보이는 green 바깥경계에서 half 안쪽으로
+    greens = [g for g in (lg, rg) if g is not None]
+    if greens:
+        if ego_lane == "RIGHT":
+            return _shift(max(greens, key=lambda f: poly_x(f, CONTROL_Y)), -half)
+        return _shift(min(greens, key=lambda f: poly_x(f, CONTROL_Y)), +half)
+
+    return None
 
 
 # ============================================================
