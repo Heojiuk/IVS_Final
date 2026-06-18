@@ -1,7 +1,9 @@
 import time
 
+
 from core_module.bus import Topics
 from messages import EgoState, DriveBehavior, Mode, ModeCause, Role
+
 
 _GPIO_AVAILABLE = False
 try:
@@ -11,19 +13,25 @@ try:
 except ImportError:
     pass
 
+
 SERVO_PIN                        = 12
 SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 40, 40
 MOTOR_FORWARD, MOTOR_BACKWARD, MOTOR_ENABLE = 5, 6, 13
 
+
 OFFSET_GAIN  = 0.5
 HEADING_GAIN = 0.5
 
+
 THROTTLE_NORMAL = 70
-THROTTLE_STEER  = 50
+THROTTLE_STEER  = 60
 THROTTLE_STOP   = 0
+
 
 STEER_THRESHOLD   = 10 / 40
 LANE_CHANGE_STEER = 0.7
+
+
 
 
 class MotionModule:
@@ -31,7 +39,7 @@ class MotionModule:
         self.role = role
         self._servo = None
         self._dc_pwm = None
-        self._last_steer = 0.0
+
 
         if _GPIO_AVAILABLE:
             GPIO.setwarnings(False)
@@ -39,6 +47,7 @@ class MotionModule:
             GPIO.setup(MOTOR_FORWARD,  GPIO.OUT)
             GPIO.setup(MOTOR_BACKWARD, GPIO.OUT)
             GPIO.setup(MOTOR_ENABLE,   GPIO.OUT)
+
 
             self._servo = AngularServo(
                 SERVO_PIN,
@@ -49,6 +58,7 @@ class MotionModule:
             self._dc_pwm = GPIO.PWM(MOTOR_ENABLE, 1000)
             self._dc_pwm.start(0)
 
+
     def step(self, bus):
         cmd    = bus.read(Topics.COMMAND)
         mode   = bus.read(Topics.MODE)
@@ -57,12 +67,15 @@ class MotionModule:
         behavior    = cmd.behavior    if cmd is not None else DriveBehavior.CRUISE
         target_lane = cmd.target_lane if cmd is not None else 0
 
+
         throttle_pwm = THROTTLE_STOP
         steer_pwm    = 0.0
+
 
         if mode is not None and mode.mode == Mode.ESTOP:
             throttle_pwm = THROTTLE_STOP
             steer_pwm    = 0.0
+
 
         elif mode is not None and mode.mode == Mode.DEGRADED:
             throttle_pwm = THROTTLE_STEER
@@ -73,10 +86,12 @@ class MotionModule:
             else:
                 steer_pwm = self._calc_steer(scene)
 
+
         else:
             if behavior == DriveBehavior.STOP:
                 throttle_pwm = THROTTLE_STOP
                 steer_pwm    = 0.0
+
 
             else:
                 if behavior == DriveBehavior.LANE_CHANGE:
@@ -90,14 +105,17 @@ class MotionModule:
                 else:
                     steer_pwm = self._calc_steer(scene)
 
+
                 # speed control based on steer angle
                 if abs(steer_pwm) >= STEER_THRESHOLD:
                     throttle_pwm =THROTTLE_NORMAL    
                 else:
-                    throttle_pwm = THROTTLE_STEER   
+                    throttle_pwm = THROTTLE_STEER  
+
 
         self._set_servo(steer_pwm)
         self._set_dc(throttle_pwm)
+
 
         ego = EgoState(
             stamp=time.monotonic(),
@@ -106,13 +124,16 @@ class MotionModule:
             behavior=behavior,
         )
 
+
         bus.publish(Topics.EGO_STATE, ego)
+
 
     def _calc_steer(self, scene):
         if scene is None or not scene.lane_valid:
             return 0.0
         steer = OFFSET_GAIN * scene.lane_offset_cm + HEADING_GAIN * scene.lane_heading_rad
         return max(-1.0, min(1.0, steer))
+
 
     def _set_servo(self, steer_pwm):
         if self._servo is None:
@@ -124,6 +145,7 @@ class MotionModule:
         else:
             angle = 90
         self._servo.angle = max(0, min(180, angle))
+
 
     def _set_dc(self, throttle_pwm):
         if self._dc_pwm is None:
@@ -140,5 +162,11 @@ class MotionModule:
             self._dc_pwm.ChangeDutyCycle(0)
             GPIO.output(MOTOR_FORWARD,  GPIO.LOW)
             GPIO.output(MOTOR_BACKWARD, GPIO.LOW)
+
+
+
+
+
+
 
 
