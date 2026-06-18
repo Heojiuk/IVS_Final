@@ -58,8 +58,8 @@ GREEN_HIGH  = (90, 255, 255)
 # ============================================================
 # Lane-detection tuning
 # ============================================================
-EGO_CENTER_X   = 182        # 차 중심선의 BEV 위치(px) — 캘리: 차 자로재서 정확히 중앙일 때 lane_center
-                            #   (WARP_W//2=200 아님 — 카메라가 차 중심서 살짝 우측 장착)
+EGO_CENTER_X   = 207        # 차 중심선의 BEV 위치(px) — 캘리: 차 자로재서 정확히 중앙일 때 lane_center
+                            #   (광각 재캘리 — 중앙정렬 시 lane_center=207)
 LANE_WIDTH_PX  = 100        # BEV 측정 한 차로폭(px) — 광각 재캘리 100px↔24cm
 NEAR_FIELD_FRAC = 0.5
 CONTROL_Y      = int(WARP_H * 0.97)   # 측정 기준행 — 차에 더 가깝게 (BEV 최하단 근처)
@@ -149,12 +149,10 @@ class LaneStateSanity:
 
     Rules:
       1. Lane width: EMA-tracked; >40 % single-frame change -> revert to EMA value.
-      2. Lane offset: >60 px single-frame jump -> revert to previous value.
-      3. Ego lane: majority of last 10 frames wins (single-frame flip suppressed).
+      2. Ego lane: majority of last 10 frames wins (single-frame flip suppressed).
     """
 
     MAX_WIDTH_JUMP_FRAC = 0.40   # 40 % width change threshold
-    MAX_OFFSET_JUMP_PX  = 60     # px
     WIDTH_EMA_ALPHA     = 0.15
     EGO_HISTORY_LEN     = 10
 
@@ -181,16 +179,7 @@ class LaneStateSanity:
                     data["ego_lane_center_px"] = self._prev.get(
                         "ego_lane_center_px", data.get("ego_lane_center_px"))
 
-        # -- 2. Offset jump -------------------------------------
-        off      = data.get("lane_offset_px")
-        prev_off = self._prev.get("lane_offset_px")
-        if off is not None and prev_off is not None:
-            if abs(off - prev_off) > self.MAX_OFFSET_JUMP_PX:
-                data["lane_offset_px"]   = prev_off
-                data["lane_offset_norm"] = self._prev.get(
-                    "lane_offset_norm", data.get("lane_offset_norm"))
-
-        # -- 3. Ego lane majority vote --------------------------
+        # -- 2. Ego lane majority vote --------------------------
         if data.get("ego_lane") is not None:
             self._ego_history.append(data["ego_lane"])
         if len(self._ego_history) >= 5:
