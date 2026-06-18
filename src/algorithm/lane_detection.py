@@ -610,14 +610,17 @@ def draw_overlay(overlay, markings, data):
     cv2.line(overlay, (EGO_CENTER_X, WARP_H - 1), (EGO_CENTER_X, 0),
              (255, 255, 255), 1)
 
-    # [D5] Derived lane-center polynomial (the curve heading/curvature come from)
+    # [D5] 추종 기준. 보라색 중앙선은 '노란선 있을 때만' 표시(중앙선 생성).
+    #      노란선 없으면 초록선 추종이라 중앙선(보라)을 안 그린다.
     cfit = center_fit(markings, data.get("ego_lane"))
+    has_yellow = markings["yellow"] is not None
     if cfit is not None:
-        pts = _clip_poly_points(cfit)                # [F3] clipped -> no out-of-frame loop
-        if pts is not None:
-            cv2.polylines(overlay, [pts], False, (255, 0, 255), 2)   # magenta = center fit
+        if has_yellow:
+            pts = _clip_poly_points(cfit)            # [F3] clipped -> no out-of-frame loop
+            if pts is not None:
+                cv2.polylines(overlay, [pts], False, (255, 0, 255), 2)   # magenta = 중앙선(노란선 기준)
 
-        # [D5] heading tangent at the car: the center direction we compare to vertical
+        # heading tangent at the car (양 모드 공통 — 추종 방향 표시)
         y0    = CONTROL_Y
         x0    = poly_x(cfit, y0)
         slope = 2.0 * cfit[0] * y0 + cfit[1]          # dx/dy at car
@@ -626,11 +629,12 @@ def draw_overlay(overlay, markings, data):
         cv2.line(overlay, (int(x0), int(y0)), (int(x1), int(y0 - dy)),
                  (0, 128, 255), 2)                      # orange = heading direction
 
-    if data["ego_lane_center_px"] is not None:
+    # 차 기준점(흰 점)은 항상, 중앙선 마커(보라)는 노란선 있을 때만
+    cv2.circle(overlay, (EGO_CENTER_X, CONTROL_Y), 6, (255, 255, 255), -1)
+    if has_yellow and data["ego_lane_center_px"] is not None:
         cx = int(data["ego_lane_center_px"])
         cv2.line(overlay, (cx, WARP_H - 1), (cx, WARP_H - 120), (255, 0, 255), 2)
-        cv2.circle(overlay, (cx, CONTROL_Y),    6, (255, 0, 255), -1)
-        cv2.circle(overlay, (EGO_CENTER_X, CONTROL_Y), 6, (255, 255, 255), -1)
+        cv2.circle(overlay, (cx, CONTROL_Y), 6, (255, 0, 255), -1)
 
 
 def draw_hud(img, data):
