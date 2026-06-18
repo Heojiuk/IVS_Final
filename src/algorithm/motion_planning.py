@@ -15,18 +15,19 @@ except ImportError:
 
 
 SERVO_PIN                        = 12
-SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 55, 55
+SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 40, 40
 MOTOR_FORWARD, MOTOR_BACKWARD, MOTOR_ENABLE = 5, 6, 13
 
 
-OFFSET_GAIN    = 0.7
-HEADING_GAIN   = 0.7
+OFFSET_GAIN    = 0.3
+HEADING_GAIN   = 0.3
 MAX_OFFSET_CM  = 12.0
 
 
-THROTTLE_NORMAL   = 40
-THROTTLE_STEER    = 40
-THROTTLE_STOP     = 0
+THROTTLE_NORMAL    = 50
+THROTTLE_STEER     = 50
+THROTTLE_LANE_LOST = 35   # 차선 미검출 시 서행 (드리프트 최소화). TBD 실측
+THROTTLE_STOP      = 0
 
 
 STEER_THRESHOLD   = 10 / 40
@@ -46,6 +47,7 @@ class MotionModule:
         self._dc_pwm  = None
         self._max_steer_since = None
         self._neutral_since   = None
+        self._last_steer      = 0.0   # 차선 미검출 시 유지할 직전 유효 조향
 
 
         if _GPIO_AVAILABLE:
@@ -89,7 +91,8 @@ class MotionModule:
         elif mode is not None and mode.mode == Mode.DEGRADED:
             throttle_pwm = THROTTLE_STEER
             if mode.cause == ModeCause.LANE_LOST:
-                steer_pwm = 0.0
+                steer_pwm    = self._last_steer       # 직진(0) 대신 직전 조향 유지 (NFR-01)
+                throttle_pwm = THROTTLE_LANE_LOST     # 더 천천히 → 이탈 거리 최소화
             elif mode.cause == ModeCause.OBSTACLE:
                 throttle_pwm = THROTTLE_STOP
             else:
@@ -156,10 +159,12 @@ class MotionModule:
 
     def _calc_steer(self, scene):
         if scene is None or not scene.lane_valid:
-            return 0.0
+            return self._last_steer        # 차선 미검출 → 직진(0) 대신 직전 조향 유지
         offset_norm = scene.lane_offset_cm / MAX_OFFSET_CM
         steer = OFFSET_GAIN * offset_norm + HEADING_GAIN * scene.lane_heading_rad
-        return max(-1.0, min(1.0, steer))
+        steer = max(-1.0, min(1.0, steer))
+        self._last_steer = steer           # 유효 조향 갱신
+        return steer
 
 
     def _set_servo(self, steer_pwm):
