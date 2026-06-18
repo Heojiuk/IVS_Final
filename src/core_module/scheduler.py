@@ -5,6 +5,8 @@
 """
 import time
 
+from core_module import config
+
 
 class Scheduler:
     def __init__(self, period_s, modules, bus):
@@ -12,6 +14,18 @@ class Scheduler:
         self.period_s = period_s
         self.modules = modules
         self.bus = bus
+        # dev 모드 + production 노드(main.py)일 때만 버스 로거를 마지막 모듈로 자동 삽입(디버깅).
+        # 정확한 V2VModule 타입만 — run_scenario 의 RecordableV2VModule(서브클래스)은 제외하여
+        # 통합테스트엔 영향 없음. 파일 열기 실패해도 주행은 계속(격리).
+        if config.mode() == "dev":
+            try:
+                from core_module.v2v import V2VModule
+                from core_module.bus_logger import BusLoggerModule
+                if any(type(m) is V2VModule for m in modules):
+                    role = next((m._role for m in modules if hasattr(m, "_role")), None)
+                    self.modules.append(BusLoggerModule(role))
+            except Exception as e:
+                print(f"[scheduler] bus logger disabled: {e!r}")
         self._running = False
         self.cycles = 0          # 누적 사이클
         self.overruns = 0        # 주기 초과(데드라인 미스) 횟수
