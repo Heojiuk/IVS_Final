@@ -13,7 +13,7 @@ from messages import DriveCommand, ModeCmd, DriveBehavior, Mode, Role
 # ── 선행차 판단 임계값 ───────────────────────────────────────────────
 SAFE_FRONT_DIST_CM = 50  # 앞 장애물 감지 거리(cm) — 이 이내면 LANE_CHANGE 트리거 (RC카 실측 후 튜닝 TODO)
 STOP_HOLD_S = 2.0  # STOP 진입 후 최소 유지 시간(초) — 정지선 hold + 채터링 방지
-LANE_CHANGE_HOLD_S = 1.5  # LANE_CHANGE 동작 유지 시간(초) — 끝나면 차선 변경 완료로 간주
+# LANE_CHANGE는 위치 기반으로 종료 — scene.current_lane이 _lane_target에 도달하면 즉시 CRUISE 복귀
 
 
 class DecisionModule:
@@ -21,8 +21,7 @@ class DecisionModule:
         """판단 모듈 초기화.  role=자차 역할(Role) — 역할별 상대차 상태 선택(후행=선행추종 / 선행=후행모니터링)"""
         self.role = role  # 역할별 상대 상태 선택 (step에서 분기)
         self._stop_until = 0.0  # 이 시각까지 STOP 유지 (정지 hold — _decide_leader)
-        self._lane_target = 0  # LANE_CHANGE 목표 차로 (트리거 시 설정, 1·2·0=미설정)
-        self._lane_change_until = 0.0  # 이 시각까지 LANE_CHANGE 동작 유지
+        self._lane_target = 0  # LANE_CHANGE 목표 차로 (0=비활성, 1·2=활성 — current_lane이 이 값 도달하면 종료)
 
     def step(self, bus):
         """50ms 주기 — scene·링크·상대상태로 행동·모드 정해 command·mode를 bus에 전송.  bus=메시지버스"""
@@ -62,17 +61,20 @@ class DecisionModule:
             not scene.front_clear or (scene.dist_front_cm is not None and scene.dist_front_cm < SAFE_FRONT_DIST_CM)
         )
         # 이미 STOP 중·LANE_CHANGE 중이면 중복 트리거 방지
-        in_action = now < self._stop_until or now < self._lane_change_until
+        in_action = now < self._stop_until or self._lane_target != 0
         # current_lane 미확정(0)이면 안전상 변경 안 함 — 내가 어느 차로인지 모르면 못 바꿈
         if obstacle_in_lane and not in_action and scene.current_lane in (1, 2):
             self._lane_target = 2 if scene.current_lane == 1 else 1  # 반대 차선
-            self._lane_change_until = now + LANE_CHANGE_HOLD_S
+
+        # ②' LANE_CHANGE 완료 — 인지가 목표 차로 도달 보고하면 즉시 종료 (perception 신뢰)
+        if self._lane_target != 0 and scene_valid and scene.current_lane == self._lane_target:
+            self._lane_target = 0
 
         # ③ behavior 결정 (우선순위 사다리)
         if now < self._stop_until:
             behavior = DriveBehavior.STOP
             target_lane = 0  # STOP 중엔 target 의미 X
-        elif now < self._lane_change_until:
+        elif self._lane_target != 0:
             behavior = DriveBehavior.LANE_CHANGE
             target_lane = self._lane_target  # 가야 할 차선
         elif scene_valid and not scene.lane_valid:
