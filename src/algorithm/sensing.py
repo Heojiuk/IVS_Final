@@ -18,11 +18,13 @@ MAIN_SIZE  = (1920, 1080)   # YOLO 용 (detect.py CAMERA_W/H 와 일치)
 LORES_SIZE = (640, 360)     # 차선 용 (v2.3 PREVIEW_SIZE 와 일치)
 RAW_SIZE   = (2304, 1296)   # ★ imx708 풀 FOV 비닝 모드 — 차선 BEV 캘리가 이 화각 기준.
                             #   raw 미지정 시 picamera2가 다른 센서모드(다른 FOV) 선택 → BEV 깨짐
-FRAME_RATE = 30
+FRAME_RATE = 20            # 20Hz 제어 루프와 정합 (30→20, 캡처/추론/렌더 부하·전력↓)
 
 # 디버그 창을 매 프레임 그리면 imshow/X 합성 부하로 저전압(undervoltage)→멈춤이 날 수 있다.
 # → 인지는 매 프레임 돌리되, 화면만 N프레임마다 1회 그려 전력 스파이크를 줄인다 (debug_view 전용).
 VIEW_RENDER_EVERY = 4
+VIEW_CAM_SIZE     = (480, 270)   # 디버그 Camera 창 표시 크기 (작을수록 X 합성 전력↓)
+VIEW_BEV_SCALE    = 0.6          # BEV 창 축소 배율
 
 # ── YOLO 모델 (고정 경로 — 명령어 인자 없이 사용) ─────────────────────
 HEF_PATH = "/home/jhoh/yolov11n.hef"   # Pi마다 위치 다르면 이 한 줄만 수정
@@ -177,8 +179,10 @@ def camera_loop(perception, stop_event, hef_path=HEF_PATH, debug_view=False):
 def _show_debug(cv2, frame_rgb, objects, bev_vis, roi_y0_frac, dist_m=None):
     """디버그 두 창 렌더 (camera_loop debug_view 전용)."""
     from algorithm import object_detection as _d
-    # picamera2 "RGB888" 배열은 실제로 BGR 순서 → cv2/imshow 에 그대로 사용 (변환 금지)
-    cam_bgr = frame_rgb.copy()
+    # 저전력: 배경은 그레이스케일(색 버림)로 두고 오버레이만 컬러로 그린다.
+    #   (picamera2 "RGB888"은 실제 BGR 순서지만 그레이 변환엔 무관)
+    gray    = cv2.cvtColor(frame_rgb, cv2.COLOR_BGR2GRAY)
+    cam_bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)   # 3채널 그레이(=오버레이 컬러 유지용)
     h, w = cam_bgr.shape[:2]
 
     # 초음파 거리 (화면 상단) — 미연결/범위밖이면 None
@@ -198,5 +202,6 @@ def _show_debug(cv2, frame_rgb, objects, bev_vis, roi_y0_frac, dist_m=None):
     cv2.putText(cam_bgr, "ego ROI", (10, max(y0 - 8, 20)),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
-    cv2.imshow("Camera (objects + ego ROI)", cv2.resize(cam_bgr, (960, 540)))
-    cv2.imshow("BEV (lane)", bev_vis)
+    cv2.imshow("Camera (objects + ego ROI)", cv2.resize(cam_bgr, VIEW_CAM_SIZE))
+    bev_small = cv2.resize(bev_vis, None, fx=VIEW_BEV_SCALE, fy=VIEW_BEV_SCALE)
+    cv2.imshow("BEV (lane)", bev_small)
