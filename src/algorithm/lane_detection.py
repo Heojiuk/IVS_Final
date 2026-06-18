@@ -72,7 +72,6 @@ MIN_BASE_SUM   = 255 * 4
 PEAK_MIN_DIST  = 50
 
 MAX_OFFSET_PX  = LANE_WIDTH_PX
-EMA_ALPHA      = 0.4
 OVERLAY_ALPHA  = 0.45
 
 # ============================================================
@@ -717,15 +716,10 @@ def draw_hud(img, data):
     else:
         put(f"curvature: {c:+.3f} 1/m", 5)
 
-    # [E5] ego-lane lock vs near-field read + switch progress
-    near = data.get("ego_nearfield") or "--"
-    cnt  = data.get("ego_switch_cnt", 0)
-    put(f"ego-lock: {ego}  near: {near}  switch: {cnt}/{SWITCH_FRAMES}", 6)
-
     # [CAL] 차로중앙 px vs EGO_CENTER_X — 차 정확히 중앙일 때 이 lane_center 값을 EGO_CENTER_X로
     cx = data.get("ego_lane_center_px")
     cx_txt = "--" if cx is None else f"{cx:.0f}"
-    put(f"lane_center: {cx_txt}px   EGO_CENTER_X: {EGO_CENTER_X}", 7)
+    put(f"lane_center: {cx_txt}px   EGO_CENTER_X: {EGO_CENTER_X}", 6)
 
 
 # 카메라 루프/표시는 통합(sensing.camera_loop + lane_pipeline)이 담당.
