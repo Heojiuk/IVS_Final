@@ -22,8 +22,8 @@ THROTTLE_NORMAL = 75
 THROTTLE_STEER  = 40
 THROTTLE_STOP   = 0
 
-STEER_THRESHOLD   = 20 / 40
-LANE_CHANGE_STEER = 0.5
+STEER_THRESHOLD   = 10 / 40
+LANE_CHANGE_STEER = 0.7
 
 
 class MotionModule:
@@ -91,9 +91,9 @@ class MotionModule:
 
                 # speed control based on steer angle
                 if abs(steer_pwm) >= STEER_THRESHOLD:
-                    throttle_pwm =THROTTLE_NORMAL    # 40 when steer >= 25deg
+                    throttle_pwm =THROTTLE_NORMAL    
                 else:
-                    throttle_pwm = THROTTLE_STEER   # 70 when steer < 25deg
+                    throttle_pwm = THROTTLE_STEER   
 
         self._set_servo(steer_pwm)
         self._set_dc(throttle_pwm)
