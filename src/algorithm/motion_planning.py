@@ -31,6 +31,7 @@ class MotionModule:
         self.role = role
         self._servo = None
         self._dc_pwm = None
+        self._last_steer = 0.0  # [버그 수정] AttributeError 방지를 위해 초기값 0.0 선언
 
         if _GPIO_AVAILABLE:
             GPIO.setwarnings(False)
@@ -53,6 +54,7 @@ class MotionModule:
         mode   = bus.read(Topics.MODE)
         scene  = bus.read(Topics.SCENE)
         leader = bus.read(Topics.LEADER_STATE)
+        
         behavior    = cmd.behavior    if cmd is not None else DriveBehavior.CRUISE
         target_lane = cmd.target_lane if cmd is not None else 0
 
@@ -89,11 +91,11 @@ class MotionModule:
                 else:
                     steer_pwm = self._calc_steer(scene)
 
-                # speed control based on steer angle
+                # [버그 수정] 조향각이 클 때(코너) 속도를 줄이고, 작을 때(직진) 속도를 높이도록 수정
                 if abs(steer_pwm) >= STEER_THRESHOLD:
-                    throttle_pwm =THROTTLE_NORMAL    
+                    throttle_pwm = THROTTLE_STEER  
                 else:
-                    throttle_pwm = THROTTLE_STEER   
+                    throttle_pwm = THROTTLE_NORMAL  
 
         self._set_servo(steer_pwm)
         self._set_dc(throttle_pwm)
@@ -109,9 +111,12 @@ class MotionModule:
 
     def _calc_steer(self, scene):
         if scene is None or not scene.lane_valid:
-            return 0.0
+            return self._last_steer # 0 대신 직전 조향 유지 → 코너 계속 따라감
+            
         steer = OFFSET_GAIN * scene.lane_offset_cm + HEADING_GAIN * scene.lane_heading_rad
-        return max(-1.0, min(1.0, steer))
+        steer = max(-1.0, min(1.0, steer))
+        self._last_steer = steer
+        return steer
 
     def _set_servo(self, steer_pwm):
         if self._servo is None:
