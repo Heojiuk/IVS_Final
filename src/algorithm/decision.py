@@ -13,6 +13,7 @@ from messages import DriveCommand, ModeCmd, DriveBehavior, Mode, Role
 # ── 선행차 판단 임계값 ───────────────────────────────────────────────
 SAFE_FRONT_DIST_CM = 50  # 앞 장애물 감지 거리(cm) — 이 이내면 LANE_CHANGE 트리거 (RC카 실측 후 튜닝 TODO)
 STOP_HOLD_S = 2.0  # STOP 진입 후 최소 유지 시간(초) — 정지선 hold + 채터링 방지
+STOP_SIGNAL_DEBOUNCE_N = 10  # stop_signal 연속 감지 사이클 수 (10×50ms=500ms) — 단발 노이즈로 인한 오정지 방지
 # LANE_CHANGE는 위치 기반으로 종료 — scene.current_lane이 _lane_target에 도달하면 즉시 CRUISE 복귀
 
 
@@ -21,6 +22,7 @@ class DecisionModule:
         """판단 모듈 초기화.  role=자차 역할(Role) — 역할별 상대차 상태 선택(후행=선행추종 / 선행=후행모니터링)"""
         self.role = role  # 역할별 상대 상태 선택 (step에서 분기)
         self._stop_until = 0.0  # 이 시각까지 STOP 유지 (정지 hold — _decide_leader)
+        self._stop_signal_count = 0  # stop_signal 연속 감지 카운트 (디바운스)
         self._lane_target = 0  # LANE_CHANGE 목표 차로 (0=비활성, 1·2=활성 — current_lane이 이 값 도달하면 종료)
 
     def step(self, bus):
@@ -53,8 +55,15 @@ class DecisionModule:
         scene_valid = scene is not None
 
         # ① STOP 트리거 (정지선·첫사이클만 — 장애물은 STOP 아님!)
-        if not scene_valid or scene.stop_signal:
+        # scene=None(시동·인지 결손)은 즉시 STOP, stop_signal은 연속 N사이클 감지 시에만 STOP (노이즈 방지)
+        if not scene_valid:
             self._stop_until = now + STOP_HOLD_S
+        elif scene.stop_signal:
+            self._stop_signal_count += 1
+            if self._stop_signal_count >= STOP_SIGNAL_DEBOUNCE_N:
+                self._stop_until = now + STOP_HOLD_S
+        else:
+            self._stop_signal_count = 0  # stop_signal=False 들어오면 카운트 리셋
 
         # ② 장애물 감지 → LANE_CHANGE 트리거 (반대 차선으로 토글)
         obstacle_in_lane = scene_valid and (
