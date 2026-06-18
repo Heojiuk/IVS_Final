@@ -11,7 +11,6 @@ from core_module.bus import Topics
 from messages import DriveCommand, ModeCmd, DriveBehavior, Mode, Role
 
 # ── 선행차 판단 임계값 ───────────────────────────────────────────────
-SAFE_FRONT_DIST_CM = 50  # 앞 장애물 감지 거리(cm) — 이 이내면 LANE_CHANGE 트리거 (RC카 실측 후 튜닝 TODO)
 STOP_HOLD_S = 2.0  # STOP 진입 후 최소 유지 시간(초) — 정지선 hold + 채터링 방지
 STOP_SIGNAL_DEBOUNCE_N = 10  # stop_signal 연속 감지 사이클 수 (10×50ms=500ms) — 단발 노이즈로 인한 오정지 방지
 # LANE_CHANGE는 위치 기반으로 종료 — scene.current_lane이 _lane_target에 도달하면 즉시 CRUISE 복귀
@@ -66,13 +65,12 @@ class DecisionModule:
             self._stop_signal_count = 0  # stop_signal=False 들어오면 카운트 리셋
 
         # ② 장애물 감지 → LANE_CHANGE 트리거 (반대 차선으로 토글)
-        obstacle_in_lane = scene_valid and (
-            not scene.front_clear or (scene.dist_front_cm is not None and scene.dist_front_cm < SAFE_FRONT_DIST_CM)
-        )
+        # front_clear는 인지가 카메라+초음파 융합 판단한 결과이므로 이것만 보면 됨
+        obstacle_in_lane = scene_valid and not scene.front_clear
         # 이미 STOP 중·LANE_CHANGE 중이면 중복 트리거 방지
         in_action = now < self._stop_until or self._lane_target != 0
-        # current_lane 미확정(0)이면 안전상 변경 안 함 — 내가 어느 차로인지 모르면 못 바꿈
-        if obstacle_in_lane and not in_action and scene.current_lane in (1, 2):
+        # current_lane은 인지가 항상 1 또는 2로 보장 → 별도 가드 불필요
+        if obstacle_in_lane and not in_action:
             self._lane_target = 2 if scene.current_lane == 1 else 1  # 반대 차선
 
         # ②' LANE_CHANGE 완료 — 인지가 목표 차로 도달 보고하면 즉시 종료 (perception 신뢰)
