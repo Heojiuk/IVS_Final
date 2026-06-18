@@ -15,21 +15,26 @@ except ImportError:
 
 
 SERVO_PIN                        = 12
-SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 40, 40
+SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 50, 50
 MOTOR_FORWARD, MOTOR_BACKWARD, MOTOR_ENABLE = 5, 6, 13
 
 
-OFFSET_GAIN  = 1.0
-HEADING_GAIN = 1.0
+OFFSET_GAIN    = 1.0
+HEADING_GAIN   = 1.0
+MAX_OFFSET_CM  = 12.0
 
 
-THROTTLE_NORMAL = 50
-THROTTLE_STEER  = 50
-THROTTLE_STOP   = 0
+THROTTLE_NORMAL   = 55
+THROTTLE_STEER    = 55
+THROTTLE_STOP     = 0
 
 
-STEER_THRESHOLD   = 30 / 40
+STEER_THRESHOLD   = 10 / 40
 LANE_CHANGE_STEER = 0.7
+
+
+MAX_STEER_HOLD_S  = 0.3  # time before neutral kick-in at max steer
+NEUTRAL_DURATION_S = 0.1  # neutral hold duration
 
 
 
@@ -37,8 +42,10 @@ LANE_CHANGE_STEER = 0.7
 class MotionModule:
     def __init__(self, role):
         self.role = role
-        self._servo = None
-        self._dc_pwm = None
+        self._servo   = None
+        self._dc_pwm  = None
+        self._max_steer_since = None
+        self._neutral_since   = None
 
 
         if _GPIO_AVAILABLE:
@@ -75,6 +82,8 @@ class MotionModule:
         if mode is not None and mode.mode == Mode.ESTOP:
             throttle_pwm = THROTTLE_STOP
             steer_pwm    = 0.0
+            self._max_steer_since = None
+            self._neutral_since   = None
 
 
         elif mode is not None and mode.mode == Mode.DEGRADED:
@@ -106,11 +115,28 @@ class MotionModule:
                     steer_pwm = self._calc_steer(scene)
 
 
-                # speed control based on steer angle
-                if abs(steer_pwm) >= STEER_THRESHOLD:
-                    throttle_pwm =THROTTLE_NORMAL    
+                # max steer → neutral → resume logic
+                now = time.monotonic()
+                if self._neutral_since is not None:
+                    if now - self._neutral_since < NEUTRAL_DURATION_S:
+                        steer_pwm = 0.0  # hold neutral
+                    else:
+                        self._neutral_since   = None  # neutral done
+                        self._max_steer_since = None
+                elif abs(steer_pwm) >= 1.0:
+                    if self._max_steer_since is None:
+                        self._max_steer_since = now
+                    elif now - self._max_steer_since >= MAX_STEER_HOLD_S:
+                        self._neutral_since = now  # enter neutral
+                        steer_pwm = 0.0
                 else:
-                    throttle_pwm = THROTTLE_STEER  
+                    self._max_steer_since = None
+
+
+                if abs(steer_pwm) >= STEER_THRESHOLD:
+                    throttle_pwm = THROTTLE_NORMAL
+                else:
+                    throttle_pwm = THROTTLE_STEER
 
 
         self._set_servo(steer_pwm)
@@ -131,7 +157,8 @@ class MotionModule:
     def _calc_steer(self, scene):
         if scene is None or not scene.lane_valid:
             return 0.0
-        steer = OFFSET_GAIN * scene.lane_offset_cm + HEADING_GAIN * scene.lane_heading_rad
+        offset_norm = scene.lane_offset_cm / MAX_OFFSET_CM
+        steer = OFFSET_GAIN * offset_norm + HEADING_GAIN * scene.lane_heading_rad
         return max(-1.0, min(1.0, steer))
 
 
@@ -161,12 +188,7 @@ class MotionModule:
         else:
             self._dc_pwm.ChangeDutyCycle(0)
             GPIO.output(MOTOR_FORWARD,  GPIO.LOW)
-            GPIO.output(MOTOR_BACKWARD, GPIO.LOW)
-
-
-
-
-
+            GPIO.output(MOTOR_BACKWARD,
 
 
 
