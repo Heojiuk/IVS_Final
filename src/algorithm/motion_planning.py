@@ -15,19 +15,19 @@ SERVO_PIN                        = 12
 SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 50, 50
 MOTOR_FORWARD, MOTOR_BACKWARD, MOTOR_ENABLE = 5, 6, 13
 
-OFFSET_GAIN  = 0.7
+OFFSET_GAIN  = 0.5
 HEADING_GAIN = 0.7
 
-THROTTLE_NORMAL = 60   # 코너 (조향 클 때)
+THROTTLE_NORMAL = 55   # 코너 (조향 클 때)
 THROTTLE_STEER  = 40   # 직진 (조향 작을 때)
 THROTTLE_STOP   = 0
 
 # 코너 판정 히스테리시스 (steer 떨림에 의한 속도 채터링 방지) — 진입/이탈 두 임계
-STEER_CORNER_ENTER = 0.45   # |steer| 이 이상 → 코너 진입
+STEER_CORNER_ENTER = 0.50   # |steer| 이 이상 → 코너 진입
 STEER_CORNER_EXIT  = 0.30   # |steer| 이 이하로 내려와야 → 직진 복귀
 
 # 종방향 슬루레이트 — 한 사이클(50ms)당 throttle '증가' 최대량 (급가속 차단)
-THROTTLE_SLEW = 5
+THROTTLE_SLEW = 2
 
 LANE_CHANGE_STEER = 0.7
 
