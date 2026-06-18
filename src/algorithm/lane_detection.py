@@ -79,7 +79,8 @@ OVERLAY_ALPHA  = 0.45
 # ============================================================
 REAL_LANE_WIDTH_M = 0.24                          # 실측: 한 차로폭(차선 라인 포함) 0.24m
 M_PER_PX_X = REAL_LANE_WIDTH_M / LANE_WIDTH_PX     # horizontal scale (m/px) = 0.24/100 = 0.0024
-M_PER_PX_Y = M_PER_PX_X                            # vertical scale; set from BEV depth if anisotropic
+M_PER_PX_Y = M_PER_PX_X / 3.0                      # vertical scale — heading 캘리: 실측 θ vs heading로
+                                                   #   비율 M_PER_PX_X/M_PER_PX_Y≈3.0 (BEV 세로 압축 보정)
 
 # [F4] curvature gate: reject fits sharper than the track's min radius (blow-ups)
 MIN_CURVE_RADIUS_M = 0.20                          # real min ~0.35m; 0.20 is a loose gate
