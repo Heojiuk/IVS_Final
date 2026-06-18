@@ -58,8 +58,8 @@ GREEN_HIGH  = (90, 255, 255)
 # ============================================================
 # Lane-detection tuning
 # ============================================================
-EGO_CENTER_X   = 207        # 차 중심선의 BEV 위치(px) — 캘리: 차 자로재서 정확히 중앙일 때 lane_center
-                            #   (광각 재캘리 — 중앙정렬 시 lane_center=207)
+EGO_CENTER_X   = 201        # 차 중심선의 BEV 위치(px) — 캘리: 차 자로재서 정확히 중앙일 때 lane_center
+                            #   (광각 재캘리 — 중앙 −1.5cm 편향 보정 207→201)
 LANE_WIDTH_PX  = 100        # BEV 측정 한 차로폭(px) — 광각 재캘리 100px↔24cm
 NEAR_FIELD_FRAC = 0.5
 CONTROL_Y      = int(WARP_H * 0.97)   # 측정 기준행 — 차에 더 가깝게 (BEV 최하단 근처)
@@ -145,41 +145,20 @@ _fit_ema: dict[str, FitEMA] = {
 # ============================================================
 class LaneStateSanity:
     """
-    Guards against physically implausible jumps between consecutive frames.
+    Ego-lane majority vote over the last N frames (single-frame flip suppressed).
 
-    Rules:
-      1. Lane width: EMA-tracked; >40 % single-frame change -> revert to EMA value.
-      2. Ego lane: majority of last 10 frames wins (single-frame flip suppressed).
+    Width/offset jump guards were removed: those values already come from
+    FitEMA-smoothed fits, and the revert-to-previous guard could permanently
+    stick on a sustained change (e.g. ego flip) instead of converging.
     """
 
-    MAX_WIDTH_JUMP_FRAC = 0.40   # 40 % width change threshold
-    WIDTH_EMA_ALPHA     = 0.15
-    EGO_HISTORY_LEN     = 10
+    EGO_HISTORY_LEN = 10
 
     def __init__(self):
-        self._prev        = {}
-        self._width_ema   = None
         self._ego_history = deque(maxlen=self.EGO_HISTORY_LEN)
 
     def check(self, data: dict) -> dict:
-        # -- 1. Lane width --------------------------------------
-        w = data.get("lane_width_px")
-        if w is not None:
-            if self._width_ema is None:
-                self._width_ema = w
-            else:
-                ratio = w / self._width_ema
-                lo, hi = 1 - self.MAX_WIDTH_JUMP_FRAC, 1 + self.MAX_WIDTH_JUMP_FRAC
-                if lo < ratio < hi:
-                    self._width_ema = (self.WIDTH_EMA_ALPHA * w
-                                       + (1 - self.WIDTH_EMA_ALPHA) * self._width_ema)
-                else:
-                    # revert both width and center (they come from the same pair)
-                    data["lane_width_px"]      = self._width_ema
-                    data["ego_lane_center_px"] = self._prev.get(
-                        "ego_lane_center_px", data.get("ego_lane_center_px"))
-
-        # -- 2. Ego lane majority vote --------------------------
+        # Ego lane majority vote
         if data.get("ego_lane") is not None:
             self._ego_history.append(data["ego_lane"])
         if len(self._ego_history) >= 5:
@@ -187,9 +166,6 @@ class LaneStateSanity:
             right_n = self._ego_history.count("RIGHT")
             data["ego_lane"]      = "LEFT" if left_n > right_n else "RIGHT"
             data["adjacent_lane"] = "RIGHT" if data["ego_lane"] == "LEFT" else "LEFT"
-
-        # snapshot non-None values for next frame
-        self._prev = {k: v for k, v in data.items() if v is not None}
         return data
 
 
