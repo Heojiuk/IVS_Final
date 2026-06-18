@@ -15,9 +15,8 @@ SERVO_PIN                        = 12
 SERVO_RIGHT_DEG, SERVO_LEFT_DEG = 55, 55
 MOTOR_FORWARD, MOTOR_BACKWARD, MOTOR_ENABLE = 5, 6, 13
 
-
-OFFSET_GAIN    = 1.0  #
-HEADING_GAIN   = 1.5  #
+OFFSET_GAIN    = 1.0
+HEADING_GAIN   = 1.5
 MAX_OFFSET_CM  = 12.0
 
 THROTTLE_NORMAL   = 35  
@@ -46,7 +45,6 @@ class MotionModule:
             GPIO.setup(MOTOR_BACKWARD, GPIO.OUT)
             GPIO.setup(MOTOR_ENABLE,   GPIO.OUT)
 
-    
             self._servo = AngularServo(
                 SERVO_PIN,
                 min_angle=0,
@@ -101,7 +99,6 @@ class MotionModule:
                 else:
                     steer_pwm = self._calc_steer(scene)
 
-    
                 now = time.monotonic()
                 if self._neutral_since is not None:
                     if now - self._neutral_since < NEUTRAL_DURATION_S:
@@ -117,6 +114,7 @@ class MotionModule:
                         steer_pwm = 0.0
                 else:
                     self._max_steer_since = None
+
                 if abs(steer_pwm) >= STEER_THRESHOLD:
                     throttle_pwm = THROTTLE_STEER
                 else:
@@ -139,7 +137,7 @@ class MotionModule:
             return 0.0
         offset_norm = scene.lane_offset_cm / MAX_OFFSET_CM
         steer = OFFSET_GAIN * offset_norm + HEADING_GAIN * scene.lane_heading_rad
-             return max(-1.0, min(1.0, steer))
+        return max(-1.0, min(1.0, steer))
 
     def _set_servo(self, steer_pwm):
         if self._servo is None:
@@ -167,4 +165,5 @@ class MotionModule:
             self._dc_pwm.ChangeDutyCycle(0)
             GPIO.output(MOTOR_FORWARD,  GPIO.LOW)
             GPIO.output(MOTOR_BACKWARD, GPIO.LOW)
+
 
