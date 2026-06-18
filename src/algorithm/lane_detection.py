@@ -60,7 +60,7 @@ GREEN_HIGH  = (90, 255, 255)
 # ============================================================
 EGO_CENTER_X   = 182        # 차 중심선의 BEV 위치(px) — 캘리: 차 자로재서 정확히 중앙일 때 lane_center
                             #   (WARP_W//2=200 아님 — 카메라가 차 중심서 살짝 우측 장착)
-LANE_WIDTH_PX  = 119        # BEV 측정 한 차로폭(px) — 캘리 페어 119px↔24cm
+LANE_WIDTH_PX  = 100        # BEV 측정 한 차로폭(px) — 광각 재캘리 100px↔24cm
 NEAR_FIELD_FRAC = 0.5
 CONTROL_Y      = int(WARP_H * 0.97)   # 측정 기준행 — 차에 더 가깝게 (BEV 최하단 근처)
 
@@ -78,7 +78,7 @@ OVERLAY_ALPHA  = 0.45
 # [v2.1] Metric conversion (for heading scale + curvature in 1/m)
 # ============================================================
 REAL_LANE_WIDTH_M = 0.24                          # 실측: 한 차로폭(차선 라인 포함) 0.24m
-M_PER_PX_X = REAL_LANE_WIDTH_M / LANE_WIDTH_PX     # horizontal scale (m/px) = 0.24/119 ~ 0.00202
+M_PER_PX_X = REAL_LANE_WIDTH_M / LANE_WIDTH_PX     # horizontal scale (m/px) = 0.24/100 = 0.0024
 M_PER_PX_Y = M_PER_PX_X                            # vertical scale; set from BEV depth if anisotropic
 
 # [F4] curvature gate: reject fits sharper than the track's min radius (blow-ups)
