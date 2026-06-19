@@ -9,7 +9,10 @@ __pycache__/
 .pytest_cache/
 .venv/
 
-# V2V 사전공유키 (각 차량 수동 배포)
+# 주행 로그 산출물 (세션마다 생성 — 레포 추적 제외)
+data/log/
+
+# V2V 사전공유키 — 절대 커밋 금지 (public repo, 운영 전 각 차량에 수동 배포)
 psk.key
 
 # Google Drive 업로드 인증 파일 (절대 커밋 금지)
