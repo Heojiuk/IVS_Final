@@ -31,9 +31,14 @@ def test_motion_model_straight():
 
 
 def test_motion_model_turn():
+    # steer 규약: 음수=좌/양수=우 (messages.py). heading -= steer·k_w·dt
+    # 양수 steer(우회전) → heading 감소
     x, y, h = apply_motion_model(0.0, 0.0, 0.0, throttle=0.0, steer=1.0, dt=1.0, k_v=1.0, k_w=math.pi/2)
-    assert abs(h - math.pi/2) < 1e-9
+    assert abs(h - (-math.pi/2)) < 1e-9
     assert abs(x) < 1e-9   # no throttle → no position change
+    # 음수 steer(좌회전) → heading 증가
+    _, _, h2 = apply_motion_model(0.0, 0.0, 0.0, throttle=0.0, steer=-1.0, dt=1.0, k_v=1.0, k_w=math.pi/2)
+    assert abs(h2 - math.pi/2) < 1e-9
 
 
 if __name__ == '__main__':

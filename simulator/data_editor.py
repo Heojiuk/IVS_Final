@@ -130,6 +130,11 @@ class DataEditorTab(ttk.Frame):
         bar.pack(fill='x', padx=6, pady=(4, 0))
 
         ttk.Button(bar, text='파일 열기', command=self._open_file).pack(side='left', padx=(0, 4))
+        ttk.Separator(bar, orient='vertical').pack(side='left', fill='y', padx=4)
+        tk.Label(bar, text='내보내기', bg='#f0f0f0', fg='#555').pack(side='left')
+        ttk.Button(bar, text='CSV',  command=self._export_csv ).pack(side='left', padx=2)
+        ttk.Button(bar, text='XLSX', command=self._export_xlsx).pack(side='left', padx=2)
+        ttk.Button(bar, text='PDF',  command=self._export_pdf ).pack(side='left', padx=2)
         ttk.Button(bar, text='저장',          command=self._save_file).pack(side='right', padx=2)
         ttk.Button(bar, text='다른 이름으로 저장', command=self._save_as).pack(side='right', padx=2)
 
@@ -171,6 +176,9 @@ class DataEditorTab(ttk.Frame):
         self._tree.tag_configure('error',    background='#ffe0e0', foreground='#990000')
         self._tree.tag_configure('hmac_bad', background='#ffd0a0', foreground='#885500')
         self._tree.tag_configure('edited',   background='#fffacc', foreground='#444400')
+        # 정상 행 교대색 (줄 구분)
+        self._tree.tag_configure('evenrow',  background='#ffffff')
+        self._tree.tag_configure('oddrow',   background='#eef1f5')
 
         self._tree.bind('<Double-1>', self._on_double_click)
 
@@ -257,6 +265,135 @@ class DataEditorTab(ttk.Frame):
         except OSError as e:
             messagebox.showerror('저장 오류', str(e))
 
+    # ── 내보내기 (CSV / XLSX / PDF) ──────────────────────────────────────
+
+    _EXPORT_HEADERS = ['#', 'tx_abs(ms)', 'tx_time', 'role', 'seq', 'lane',
+                       'behavior', 'throttle_pwm', 'steer_pwm', 'hmac', 't_tx(s)']
+
+    def _export_table(self):
+        """현재 로드된 패킷 → (헤더, 행리스트). 파싱값을 사람이 읽기 좋은 형태로."""
+        rows = []
+        for i, p in enumerate(self._packets):
+            f = p['fields']
+            if f is None:
+                rows.append([i + 1, '', '', '', '', '', '', '', '', 'PARSE_ERR', ''])
+            else:
+                rows.append([
+                    i + 1, f['tx_abs'], fmt_ms_of_day(f['tx_abs']),
+                    _ROLE_NAMES.get(f['role'], f['role']),
+                    f['seq'], f['lane'],
+                    _BEH_NAMES.get(f['behavior'], f['behavior']),
+                    round(f['throttle_pwm'], 6), round(f['steer_pwm'], 6),
+                    'OK' if f['hmac_ok'] else 'BAD',
+                    round(f['t_tx'], 6),
+                ])
+        return self._EXPORT_HEADERS, rows
+
+    def _ask_export_path(self, ext, desc):
+        if not self._packets:
+            messagebox.showinfo('내보내기', '로드된 패킷이 없습니다.')
+            return None
+        import os
+        init = (os.path.splitext(os.path.basename(self._path))[0] if self._path else 'session')
+        return filedialog.asksaveasfilename(
+            defaultextension=ext, initialfile=init + ext,
+            filetypes=[(desc, '*' + ext), ('All', '*.*')], title=f'{desc} 내보내기')
+
+    def _export_csv(self):
+        path = self._ask_export_path('.csv', 'CSV')
+        if not path:
+            return
+        import csv
+        headers, rows = self._export_table()
+        dlg = _ProgressDialog(self, 'CSV 내보내기', len(rows))
+        try:
+            with open(path, 'w', newline='', encoding='utf-8-sig') as f:   # BOM → Excel 한글 OK
+                w = csv.writer(f)
+                w.writerow(headers)
+                for i, row in enumerate(rows):
+                    w.writerow(row)
+                    dlg.advance(i + 1, f'{i + 1} / {len(rows)} 행')
+            dlg.done(f'완료 — {len(rows)}행')
+        except OSError as e:
+            dlg.close(); messagebox.showerror('CSV 오류', str(e)); return
+        dlg.close()
+        self._status_var.set(f'CSV 내보내기 완료: {path} ({len(rows)}행)')
+
+    def _export_xlsx(self):
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill
+        except ImportError:
+            messagebox.showwarning('XLSX', 'XLSX 내보내기는 openpyxl 이 필요합니다.\n'
+                                            '설치: py -m pip install openpyxl')
+            return
+        path = self._ask_export_path('.xlsx', 'Excel')
+        if not path:
+            return
+        headers, rows = self._export_table()
+        dlg = _ProgressDialog(self, 'XLSX 내보내기', len(rows))
+        try:
+            wb = openpyxl.Workbook(); ws = wb.active; ws.title = 'packets'
+            ws.append(headers)
+            hdr_fill = PatternFill('solid', fgColor='DDDDDD')
+            for c in ws[1]:
+                c.font = Font(bold=True); c.fill = hdr_fill
+            ws.freeze_panes = 'A2'
+            odd = PatternFill('solid', fgColor='EEF1F5')
+            for i, r in enumerate(rows):
+                ws.append(r)
+                if i % 2 == 1:                  # 교대색 (줄 구분)
+                    for c in ws[i + 2]:
+                        c.fill = odd
+                dlg.advance(i + 1, f'{i + 1} / {len(rows)} 행')
+            dlg.set_text('파일 저장 중...')
+            wb.save(path)
+            dlg.done(f'완료 — {len(rows)}행')
+        except OSError as e:
+            dlg.close(); messagebox.showerror('XLSX 오류', str(e)); return
+        dlg.close()
+        self._status_var.set(f'XLSX 내보내기 완료: {path} ({len(rows)}행)')
+
+    def _export_pdf(self):
+        try:
+            from matplotlib.backends.backend_pdf import PdfPages
+            from matplotlib.figure import Figure
+        except ImportError:
+            messagebox.showwarning('PDF', 'PDF 내보내기는 matplotlib 이 필요합니다.\n'
+                                           '설치: py -m pip install matplotlib')
+            return
+        path = self._ask_export_path('.pdf', 'PDF')
+        if not path:
+            return
+        headers, rows = self._export_table()
+        PER_PAGE = 30
+        n_pages = max(1, (len(rows) + PER_PAGE - 1) // PER_PAGE)
+        dlg = _ProgressDialog(self, 'PDF 내보내기', n_pages)
+        try:
+            with PdfPages(path) as pdf:
+                for pg, start in enumerate(range(0, len(rows), PER_PAGE)):
+                    chunk = rows[start:start + PER_PAGE]
+                    fig = Figure(figsize=(11.7, 8.3))   # A4 가로
+                    ax = fig.add_subplot(111); ax.axis('off')
+                    tbl = ax.table(cellText=[[str(c) for c in r] for r in chunk],
+                                   colLabels=headers, loc='center', cellLoc='center')
+                    tbl.auto_set_font_size(False); tbl.set_fontsize(6.5)
+                    tbl.scale(1, 1.3)
+                    for (ri, ci), cell in tbl.get_celld().items():
+                        if ri == 0:                       # 헤더
+                            cell.set_facecolor('#dddddd'); cell.set_text_props(weight='bold')
+                        elif ri % 2 == 0:                 # 교대색
+                            cell.set_facecolor('#eef1f5')
+                    ax.set_title(f'session packets  {start + 1}~{start + len(chunk)} / {len(rows)}',
+                                 fontsize=9)
+                    pdf.savefig(fig)
+                    dlg.advance(pg + 1, f'{pg + 1} / {n_pages} 페이지')
+            dlg.done(f'완료 — {n_pages}페이지')
+        except OSError as e:
+            dlg.close(); messagebox.showerror('PDF 오류', str(e)); return
+        dlg.close()
+        self._status_var.set(f'PDF 내보내기 완료: {path} ({len(rows)}행)')
+
     # ── 트리뷰 갱신 ──────────────────────────────────────────────────────
 
     def _refresh_tree(self):
@@ -264,7 +401,7 @@ class DataEditorTab(ttk.Frame):
         for i, p in enumerate(self._packets):
             self._tree.insert('', 'end', iid=str(i),
                               values=self._row_values(i, p),
-                              tags=self._row_tags(p))
+                              tags=self._row_tags(p, i))
 
     def _row_values(self, i, p):
         f   = p['fields']
@@ -285,14 +422,14 @@ class DataEditorTab(ttk.Frame):
             _fmt_raw60(raw),
         )
 
-    def _row_tags(self, p):
+    def _row_tags(self, p, i=0):
         if p['error']:
             return ('error',)
         if p['edited']:
             return ('edited',)
         if not p['fields']['hmac_ok']:
             return ('hmac_bad',)
-        return ()
+        return ('evenrow' if i % 2 == 0 else 'oddrow',)   # 정상 행 교대색
 
     # ── 더블클릭 편집 ────────────────────────────────────────────────────
 
@@ -322,7 +459,7 @@ class DataEditorTab(ttk.Frame):
         p['edited'] = True
         self._tree.item(str(idx),
                         values=self._row_values(idx, p),
-                        tags=self._row_tags(p))
+                        tags=self._row_tags(p, idx))
         n_edited = sum(1 for pkt in self._packets if pkt['edited'])
         self._status_var.set(
             f'{len(self._packets)}개 패킷 | 편집됨 {n_edited}개 (노란색) | 저장 버튼으로 적용')
@@ -419,4 +556,64 @@ class PacketEditDialog(tk.Toplevel):
         new_fields['throttle_pwm'] = thr
         new_fields['steer_pwm']    = st
         self._on_confirm(self._idx, new_fields)
+        self.destroy()
+
+
+# ── 내보내기 진행 모달 ─────────────────────────────────────────────────────
+
+class _ProgressDialog(tk.Toplevel):
+    """내보내기 진행 모달 — 문서 완성까지 프로그레스 바 표시.
+    동기 진행(메인 스레드) + 주기적 update_idletasks 로 바를 갱신한다."""
+
+    def __init__(self, parent, title, maximum):
+        super().__init__(parent)
+        self.title(title)
+        self.resizable(False, False)
+        self._max = max(1, int(maximum))
+        self._last_pct = -1
+        tk.Label(self, text=title, font=('TkDefaultFont', 10, 'bold')).pack(padx=26, pady=(16, 4))
+        self._lbl = tk.Label(self, text='준비 중...', fg='#555', width=34)
+        self._lbl.pack(padx=26)
+        self._bar = ttk.Progressbar(self, mode='determinate', maximum=self._max, length=340)
+        self._bar.pack(padx=26, pady=(8, 18))
+        self.transient(parent)
+        self.protocol('WM_DELETE_WINDOW', lambda: None)   # 완료 전 닫기 방지
+        self.grab_set()                                    # 모달
+        self._center(parent)
+        self.update_idletasks()
+
+    def _center(self, parent):
+        try:
+            self.update_idletasks()
+            px, py = parent.winfo_rootx(), parent.winfo_rooty()
+            pw, ph = parent.winfo_width(), parent.winfo_height()
+            w, h = self.winfo_reqwidth(), self.winfo_reqheight()
+            self.geometry(f'+{px + (pw - w) // 2}+{py + (ph - h) // 2}')
+        except tk.TclError:
+            pass
+
+    def advance(self, value, text=None):
+        """진행값 갱신. ~1% 단위로만 repaint (대량 행에서 성능)."""
+        self._bar['value'] = value
+        if text is not None:
+            self._lbl.config(text=text)
+        pct = int(value * 100 / self._max)
+        if pct != self._last_pct:
+            self._last_pct = pct
+            self.update_idletasks()
+
+    def set_text(self, text):
+        self._lbl.config(text=text)
+        self.update_idletasks()
+
+    def done(self, text='완료'):
+        self._bar['value'] = self._max
+        self._lbl.config(text=text)
+        self.update_idletasks()
+
+    def close(self):
+        try:
+            self.grab_release()
+        except tk.TclError:
+            pass
         self.destroy()

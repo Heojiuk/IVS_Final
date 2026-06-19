@@ -4,9 +4,10 @@ from dataclasses import dataclass
 
 # ── 트랙 지오메트리 (Rounded Rectangle / Stadium) ─────────────────────
 # 실제 트랙: 직선 구간 + 반원 곡선. 타원 아님.
-#   전체 폭 2.5m, 전체 높이 2.05m
-#   반원 반지름 R = 1.025m, 직선 절반 길이 S = 0.225m  (S*2 + R*2 = 2.5m)
-_STRAIGHT = 0.225   # 직선 구간 절반 길이 (m)
+#   반원 반지름 R = 1.025m (커브 유지), 직선 절반 길이 S
+#   위/아래 직선만 좌우로 늘려 캔버스 녹색 여백을 채움 (커브 R은 불변).
+#   S = 0.95 → 외곽선(R=1.225) 폭 = 2*(S+1.225) = 4.35m ≈ 870px (캔버스 900px, 좌우 여백 ~15px)
+_STRAIGHT = 0.95   # 직선 구간 절반 길이 (m) — 좌우 여백 채우도록 연장
 _TRACK_LINES = [
     (1.225, '#22aa22', 3),   # 외곽 초록  (R = 1.025 + 0.20)
     (1.025, '#ddcc00', 3),   # 노란 중앙선 (R = 1.025)
@@ -108,8 +109,10 @@ def world_to_screen(wx, wy, cx=_CX, cy=_CY, scale=None,
 
 
 def apply_motion_model(x, y, heading, throttle, steer, dt, k_v, k_w):
-    """단순 비례 움직임 모델. (new_x, new_y, new_heading) 반환."""
-    heading = heading + steer * k_w * dt
+    """단순 비례 움직임 모델. (new_x, new_y, new_heading) 반환.
+    steer 규약: 음수=좌회전 / 양수=우회전 (messages.py). 화면(y-아래) 기준 좌=CCW=heading 증가
+    → heading 은 steer 를 빼서 갱신(heading -= steer·k_w·dt)."""
+    heading = heading - steer * k_w * dt
     x = x + throttle * k_v * math.cos(heading) * dt
     y = y + throttle * k_v * math.sin(heading) * dt
     return x, y, heading
@@ -256,6 +259,7 @@ try:
             self._us_phase       = 0.0     # 초음파 펄스 애니메이션 위상 (0~1)
             self._pi_ghost_label = None    # pi 차량 유령 라벨 (None=일반)
             self._sim_ghost_label = None   # sim 차량 유령 라벨 (None=일반)
+            self._aero_on = False          # 공력(후류·드래프팅) 근사 오버레이
 
             self._draw_track()
             self.bind('<Button-1>',        self._on_left_click)
@@ -307,9 +311,11 @@ try:
                 self._objects.append(TrackObject(kind=self._place_mode, wx=wx, wy=wy))
                 self._redraw_objects()
                 return   # 배치 모드 유지 (연속 배치 가능)
-            # 배치 모드 아님 → 차량 시작 위치 설정
-            self._pi_state  = [wx, wy, 0.0]
-            self._sim_state = [wx, wy, 0.0]
+            # 배치 모드 아님 → 차량 시작 위치 설정 (CCW 진행방향으로 헤딩 지정)
+            nx, ny = _track_perpendicular(wx, wy)   # 내향 법선
+            h = math.atan2(-nx, ny)                 # -90° 회전 = CCW 접선(하단=동/상단=서)
+            self._pi_state  = [wx, wy, h]
+            self._sim_state = [wx, wy, h]
             self._redraw_vehicles()
 
         def _on_right_click(self, event):
@@ -444,6 +450,8 @@ try:
             self._sim_state = None
             self.delete('pi_vehicle')
             self.delete('sim_vehicle')
+            self.delete('sensor')   # 카메라·초음파 콘도 제거 (차량 없으면 표시 안 함)
+            self.delete('aero')     # 공력 오버레이도 제거
             self._highlighted_objs.clear()
             self._redraw_objects()
 
@@ -576,9 +584,66 @@ try:
             self._sim_ghost_label = label
             self._redraw_vehicles()
 
+        def set_aero(self, on):
+            """선행차(pi) 공력 근사 오버레이 on/off — 후류+드래프팅 효과 시각화."""
+            self._aero_on = bool(on)
+            self._redraw_vehicles()
+
+        def _draw_aero(self):
+            """선행차 주변 공력 '근사 시각화'(실제 CFD 아님): 후류(뒤=저속) + 측방 가속류.
+            후행차(sim)가 후류 안에 있으면 간격 기반 추정 항력감소%를 표시."""
+            self.delete('aero')
+            if not self._aero_on or self._pi_state is None:
+                return
+            wx, wy, h = self._pi_state
+            fx, fy = math.cos(h), math.sin(h)     # 진행 방향
+            px, py = -fy, fx                       # 측방
+            L, W = 0.16, 0.12                      # 차체 반길이/반폭(대략)
+
+            def poly(pts, color, stip):
+                flat = []
+                for fwd, lat in pts:
+                    sx, sy = world_to_screen(wx + fx * fwd + px * lat,
+                                             wy + fy * fwd + py * lat)
+                    flat += [sx, sy]
+                self.create_polygon(flat, fill=color, outline='', stipple=stip, tags='aero')
+
+            # 후류(뒤, fwd<0): 저속(파랑, 근접) → 회복(초록, 먼쪽). 바깥부터 그려 안쪽이 위로.
+            poly([(-L, -W*1.5), (-L-1.7, -W*2.3), (-L-1.7, W*2.3), (-L, W*1.5)], '#33cc66', 'gray12')
+            poly([(-L, -W*1.2), (-L-1.0, -W*1.9), (-L-1.0, W*1.9), (-L, W*1.2)], '#1199cc', 'gray25')
+            poly([(-L, -W),     (-L-0.5, -W*1.4), (-L-0.5, W*1.4), (-L, W)],     '#2244dd', 'gray50')
+            # 측방 가속류(빨강/노랑) + 전방 정체(파랑)
+            poly([(L, W), (L, W+0.13), (-L, W+0.13), (-L, W)], '#ff7722', 'gray25')
+            poly([(L, -W), (L, -W-0.13), (-L, -W-0.13), (-L, -W)], '#ff7722', 'gray25')
+            poly([(L, W*0.5), (L+0.18, 0), (L, -W*0.5)], '#3366dd', 'gray50')
+
+            # 범례 + '근사' 경고
+            self.create_rectangle(12, 44, 24, 56, fill='#2244dd', outline='', tags='aero')
+            self.create_text(28, 50, text='저속(후류)', anchor='w', fill='#2244dd',
+                             font=('TkDefaultFont', 8), tags='aero')
+            self.create_rectangle(108, 44, 120, 56, fill='#ff7722', outline='', tags='aero')
+            self.create_text(124, 50, text='고속(가속류)', anchor='w', fill='#cc5500',
+                             font=('TkDefaultFont', 8), tags='aero')
+            self.create_text(12, 64, text='※ 공력 근사 시각화 — 실제 CFD 해석 아님',
+                             anchor='w', fill='#aa3333', font=('TkDefaultFont', 8), tags='aero')
+
+            # 드래프팅: 후행차(sim)가 후류 안(뒤)에 있으면 추정 항력감소% (경험식)
+            if self._sim_state is not None:
+                sxw, syw = self._sim_state[0] - wx, self._sim_state[1] - wy
+                back = -(sxw * fx + syw * fy)             # 선행차 뒤로 떨어진 거리
+                lat  = abs(-sxw * fy + syw * fx)          # 측방 이탈
+                if 0 < back < 1.9 and lat < W * 2.3:
+                    gap = max(0.0, back - 2 * L)          # 범퍼 간 간격(근사)
+                    drag = 30.0 * math.exp(-gap / 0.5)    # 추정 항력감소% (간격↑→효과↓)
+                    tx, ty = world_to_screen(self._sim_state[0], self._sim_state[1])
+                    self.create_text(tx, ty + 24,
+                                     text=f'드래프팅 ↓항력 {drag:.0f}% (추정)',
+                                     fill='#0066aa', font=('TkDefaultFont', 8, 'bold'), tags='aero')
+
         def _redraw_vehicles(self):
             self.delete('pi_vehicle')
             self.delete('sim_vehicle')
+            self._draw_aero()      # 공력 오버레이 (차량 아래)
             self._draw_sensors()   # 차량 아래 레이어로 먼저
             if self._pi_state:
                 sx, sy = world_to_screen(*self._pi_state[:2])

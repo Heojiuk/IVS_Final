@@ -72,9 +72,9 @@ with open(out_path, 'wb') as fh:
                          RY * math.cos(theta) * dtheta)
         throttle_val = max(0.0, min(1.0, ds / (K_V * DT)))
 
-        # 헤딩 변화 → steer_pwm  (양수 = 반시계 = 화면상 좌회전)
+        # 헤딩 변화 → steer_pwm  (규약: 음수=좌회전/양수=우회전, 모션모델 heading-=steer·k_w·dt 와 일관)
         dh = _angle_diff(headings[i + 1], headings[i])
-        steer_val = max(-1.0, min(1.0, dh / (K_W * DT)))
+        steer_val = max(-1.0, min(1.0, -dh / (K_W * DT)))
 
         ego = EgoState(
             stamp        = t_base + i / HZ,

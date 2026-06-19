@@ -105,6 +105,8 @@ class App(tk.Tk):
                               command=self._open_live_monitor)
         view_menu.add_command(label='bin 분석 (Bin Analysis)',
                               command=self._open_bin_analysis)
+        view_menu.add_command(label='원시 데이터 뷰 (Raw Data View)',
+                              command=self._open_raw_data_view)
         menubar.add_cascade(label='View', menu=view_menu)
         self.config(menu=menubar)
 
@@ -140,6 +142,15 @@ class App(tk.Tk):
             messagebox.showwarning('View', _VIEW_DEP_MSG, parent=self)
             return
         dv[1](self, LOG_ROOT)          # BinAnalysisWindow
+
+    def _open_raw_data_view(self):
+        """Pi가 dev 모드에서 저장한 .buslog 를 표로 보고 CSV/XLSX/PDF 내보내기."""
+        try:
+            from raw_data_view import RawDataViewWindow
+        except ImportError as e:
+            messagebox.showwarning('View', f'원시 데이터 뷰 임포트 실패: {e}', parent=self)
+            return
+        RawDataViewWindow(self, LOG_ROOT)
 
     def _on_tab_change(self, event):
         nb    = event.widget
@@ -252,6 +263,11 @@ class RoleTab(ttk.Frame):
             self._obj_btns[kind] = b
         ttk.Button(btn_bar, text='오브젝트 전체 삭제',
                    command=lambda: self._track.clear_objects()).pack(side='left', padx=4)
+        # 공력(후류·드래프팅) 근사 오버레이 토글
+        self._aero_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(btn_bar, text='💨 공력', variable=self._aero_var,
+                        command=lambda: self._track.set_aero(self._aero_var.get())
+                        ).pack(side='left', padx=4)
 
         # 배치 모드 상태 표시
         self._obj_mode_var = tk.StringVar(value='')
@@ -379,6 +395,7 @@ class RoleTab(ttk.Frame):
                             ('pi_lane',     '상대차선(pi_lane)'),
                             ('pi_throttle', '상대스로틀(pi_throttle)'),
                             ('pi_steer',    '상대조향(pi_steer)'),
+                            ('pi_behavior', '상대동작(pi_behavior)'),
                             ('link_state',  '링크상태(link_state)'),
                             ('link_age',    '링크경과(link_age)')]:
             self._add_monitor_row(lf, key, label)
@@ -414,7 +431,7 @@ class RoleTab(ttk.Frame):
 
     # ── 네트워크 설정 ────────────────────────────────────────────────
     _NET_IPS = {
-        'dev':      {'leader': '192.168.202.91', 'follower': '192.168.201.102'},
+        'dev':      {'leader': '192.168.203.237', 'follower': '192.168.201.102'},
         'release':  {'leader': '192.168.0.11',    'follower': '192.168.0.12'},
         'loopback': {'leader': '127.0.0.1',       'follower': '127.0.0.1'},
     }
@@ -581,6 +598,14 @@ class RoleTab(ttk.Frame):
                                      state='disabled')
         self._pause_btn.pack(side='left', padx=2)
 
+        # V2V 송출 on/off — 재생 데이터를 실제로 UDP 재송신할지
+        v2v_row = tk.Frame(self._pb_frame, bg='white')
+        v2v_row.pack(fill='x')
+        self._pb_v2v_on = tk.BooleanVar(value=False)
+        tk.Checkbutton(v2v_row, text='V2V 송출 (재생 패킷을 UDP 재송신)',
+                       variable=self._pb_v2v_on, bg='white', activebackground='white'
+                       ).pack(side='left')
+
         # 배속 선택
         spd_row = tk.Frame(self._pb_frame, bg='white')
         spd_row.pack(fill='x')
@@ -612,8 +637,9 @@ class RoleTab(ttk.Frame):
             self._ctrl_frame.pack_forget()
             self._pb_frame.pack_forget()
 
-        # playback 은 녹화 데이터 재생 → 인지 파라미터 주입 비활성화 (값은 파싱본을 표시)
-        st = 'disabled' if mode == 'playback' else 'normal'
+        # 시뮬레이터에서만 인지 파라미터 주입 가능. realtime(수신 관찰)·playback(재생)은
+        # read-only — 값은 통신으로 받은/파싱한 데이터를 표시만 한다.
+        st = 'normal' if mode == 'simulator' else 'disabled'
         for w in self._perception_widgets:
             try:
                 w.configure(state=st)
@@ -848,13 +874,18 @@ class RoleTab(ttk.Frame):
     def _play(self):
         if not self._playback_packets:
             return
-        # UDP 재송신 소켓 열기 (저장 데이터를 그대로 다시 쏨)
-        self._apply_network_settings()
-        import socket as _socket
-        cfg = config.for_role(self._role)
-        if self._pb_udp_sock is None:
-            self._pb_udp_sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
-        self._pb_peer = (cfg['peer_ip'], cfg['peer_port'])
+        # V2V 송출 체크 시에만 UDP 재송신 소켓 열기 (저장 데이터를 그대로 다시 쏨)
+        if self._pb_v2v_on.get():
+            self._apply_network_settings()
+            import socket as _socket
+            cfg = config.for_role(self._role)
+            if self._pb_udp_sock is None:
+                self._pb_udp_sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+            self._pb_peer = (cfg['peer_ip'], cfg['peer_port'])
+        elif self._pb_udp_sock is not None:   # 송출 끔 → 기존 소켓 닫기
+            try: self._pb_udp_sock.close()
+            except Exception: pass
+            self._pb_udp_sock = None
         if self._pb_idx == 0:
             self._pb_tx_ok = self._pb_tx_fail = 0
         self._pb_running = True
@@ -929,10 +960,21 @@ class RoleTab(ttk.Frame):
         # 파싱한 실제 값을 UI 에 반영 (값 변화 확인용)
         self._refresh_playback_labels(pkt)
 
+        # plot viewer(LiveMonitor)도 재생 데이터로 구동 (열려 있으면)
+        if self._live_monitor is not None and self._live_monitor.winfo_exists():
+            self._live_monitor.add_sample(self._pb_idx * (TICK_MS / 1000.0), {
+                'throttle': pkt.throttle_pwm, 'steer': pkt.steer_pwm,
+                'behavior': int(pkt.behavior),
+                'pi_throttle': pkt.throttle_pwm, 'pi_steer': pkt.steer_pwm,
+                'pi_lane': pkt.lane, 'pi_seq': pkt.seq, 'current_lane': pkt.lane,
+            })
+
         # UI 갱신
         self._pb_progress['value'] = self._pb_idx
         cur_t = fmt_ms_of_day(pkt.tx_abs)
-        tx_info = f'  TX:{self._pb_tx_ok}' + (f' 실패:{self._pb_tx_fail}' if self._pb_tx_fail else '')
+        tx_info = ''
+        if self._pb_udp_sock is not None:   # V2V 송출 중일 때만 표시
+            tx_info = f'  TX:{self._pb_tx_ok}' + (f' 실패:{self._pb_tx_fail}' if self._pb_tx_fail else '')
         self._pb_cur_time.set(f'{cur_t}  ({self._pb_idx} / {n}){tx_info}')
 
         # 다음 패킷까지 원본 tx 간격으로 스케줄 (tx 타이밍 보존), 배속 적용
@@ -955,6 +997,7 @@ class RoleTab(ttk.Frame):
         lbl['pi_lane'].set(str(pkt.lane))
         lbl['pi_throttle'].set(f'{pkt.throttle_pwm:.3f}')
         lbl['pi_steer'].set(f'{pkt.steer_pwm:.3f}')
+        lbl['pi_behavior'].set(pkt.behavior.name)
         # 인지 현재차선도 파싱값으로 표시 (입력은 비활성, 표시는 갱신)
         if pkt.lane in (0, 1, 2) and 'current_lane' in self._scene_vars:
             self._scene_vars['current_lane'].set(pkt.lane)
@@ -1232,7 +1275,8 @@ class RoleTab(ttk.Frame):
         while dh >  math.pi: dh -= 2 * math.pi
         while dh < -math.pi: dh += 2 * math.pi
 
-        steer    = max(-0.5, min(0.5, dh / (kw * dt)))
+        # steer 규약(음수=좌/양수=우)에 맞춰 -dh (모션모델 heading -= steer·k_w·dt 와 일관)
+        steer    = max(-0.5, min(0.5, -dh / (kw * dt)))
         throttle = max(-1.0, min(1.0, self._sim_throttle.get()))
 
         from messages import DriveBehavior, EgoState, Role
@@ -1590,6 +1634,7 @@ class RoleTab(ttk.Frame):
             lbl['pi_lane'].set(str(pi.lane))
             lbl['pi_throttle'].set(f'{pi.throttle_pwm:.3f}')
             lbl['pi_steer'].set(f'{pi.steer_pwm:.3f}')
+            lbl['pi_behavior'].set(pi.behavior.name)
         if snap.get('link'):
             lbl['link_state'].set(snap['link'].state.name)
             lbl['link_age'].set(f"{snap['link'].age_rx:.0f}ms")
