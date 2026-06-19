@@ -8,12 +8,16 @@
 import time
 
 from core_module.bus import Topics
-from messages import DriveCommand, ModeCmd, DriveBehavior, Mode, Role
+from messages import DriveCommand, ModeCmd, DriveBehavior, Mode, ModeCause, LinkState, Role
 
 # ── 선행차 판단 임계값 ───────────────────────────────────────────────
 STOP_HOLD_S = 2.0  # STOP 진입 후 최소 유지 시간(초) — 정지선 hold + 채터링 방지
 STOP_SIGNAL_DEBOUNCE_N = 10  # stop_signal 연속 감지 사이클 수 (10×50ms=500ms) — 단발 노이즈로 인한 오정지 방지
 # LANE_CHANGE는 위치 기반으로 종료 — scene.current_lane이 _lane_target에 도달하면 즉시 CRUISE 복귀
+
+# ── 후행차 판단 임계값 (초음파 거리, cm) — 팀 캘리브레이션 대상 ────────
+FOLLOW_STOP_CM = 10.0  # 선행차와 이보다 가까우면 STOP (추돌 방지)
+FOLLOW_SLOW_CM = 20.0  # 이보다 가까우면(STOP 거리 전) SLOW (거리 유지 감속)
 
 
 class DecisionModule:
@@ -98,12 +102,61 @@ class DecisionModule:
         return command, mode
 
     def _decide_follower(self, scene, link, peer):
-        """후행차 판단 — 선행 추종(peer.throttle_pwm·steer_pwm 참고) + 차선·거리 보정.
-        반환: (DriveCommand, ModeCmd)"""
-        # ── 후행차 ────────────────────────────────────────────────
-        # peer = 선행 상태(LEADER_STATE) — link.state 확인 후 추종에 반영
-        # TODO(follower-mode):     scene·link 로 mode 결정 (link LOST → DEGRADED 등)
-        # TODO(follower-behavior): peer.throttle_pwm·steer_pwm·behavior 참고 + 차선 보정
-        command = DriveCommand(stamp=time.monotonic(), behavior=DriveBehavior.CRUISE)  # ← 지금은 더미값
-        mode = ModeCmd(stamp=time.monotonic(), mode=Mode.NORMAL)  # ← 지금은 더미값
+        """후행차 판단 — V2V 선행차 + 차선 + 초음파로 트레일러식 추종(일정 거리 유지).
+
+        선행차와 달리 자체 객체인식이 없음 → 정지선은 선행차 STOP(V2V)으로만 인지,
+        차선변경도 선행차 LANE_CHANGE(V2V)를 받아 따라간다(반대 차로로 토글, 위치 도달 시 종료).
+        거리 유지는 초음파(dist_front_cm)로 이산 제어: 가까우면 SLOW, 더 가까우면 STOP.
+        통신 폴백: link STALE→SLOW(DEGRADED), LOST→STOP(ESTOP). peer/scene 결손도 STOP.
+        우선순위(위가 이김): STOP > LANE_CHANGE > SLOW > CRUISE
+        반환: (DriveCommand, ModeCmd)
+        """
+        now = time.monotonic()
+        scene_valid = scene is not None
+        link_state = link.state if link is not None else LinkState.LOST  # link 없으면 끊김 취급
+        dist = scene.dist_front_cm if scene_valid else None              # 초음파 = 선행차까지 거리
+
+        """통신·차선 상태 이상 여부 판단"""
+        # ── 통신·차선 상태 → mode (안전 폴백; motion 이 ESTOP/DEGRADED 우선 처리) ──
+        if link_state == LinkState.LOST:
+            mode = ModeCmd(stamp=now, mode=Mode.ESTOP, cause=ModeCause.LINK_LOST)
+        elif link_state == LinkState.STALE:
+            mode = ModeCmd(stamp=now, mode=Mode.DEGRADED, cause=ModeCause.LINK_LOST)
+        elif scene_valid and not scene.lane_valid:
+            mode = ModeCmd(stamp=now, mode=Mode.DEGRADED, cause=ModeCause.LANE_LOST)
+        else:
+            mode = ModeCmd(stamp=now, mode=Mode.NORMAL, cause=ModeCause.NONE)
+
+        # ① STOP 트리거 (하나라도 → STOP hold 갱신; 채터 방지)
+        #    인지결손·통신끊김·선행차정지(정지선)·초음파 추돌근접
+        too_close = dist is not None and dist < FOLLOW_STOP_CM
+        leader_stop = peer is not None and peer.behavior == DriveBehavior.STOP
+        if (not scene_valid) or (link_state == LinkState.LOST) or leader_stop or too_close:
+            self._stop_until = now + STOP_HOLD_S
+
+        # ② LANE_CHANGE — 선행차 V2V behavior 추종 (목표는 내 현재 차로의 반대로 토글)
+        leader_lc = peer is not None and peer.behavior == DriveBehavior.LANE_CHANGE
+        in_action = now < self._stop_until or self._lane_target != 0  # STOP·LC 중 중복 트리거 방지
+        if leader_lc and not in_action and scene_valid:
+            self._lane_target = 2 if scene.current_lane == 1 else 1
+        # ②' 완료 — 인지가 목표 차로 도달 보고 시 즉시 종료
+        if self._lane_target != 0 and scene_valid and scene.current_lane == self._lane_target:
+            self._lane_target = 0
+
+        # ③ behavior 결정 (우선순위 사다리)
+        slow_gap = dist is not None and FOLLOW_STOP_CM <= dist < FOLLOW_SLOW_CM
+        if now < self._stop_until:
+            behavior = DriveBehavior.STOP
+            target_lane = 0  # STOP 중엔 target 의미 X
+        elif self._lane_target != 0:
+            behavior = DriveBehavior.LANE_CHANGE
+            target_lane = self._lane_target
+        elif link_state == LinkState.STALE or slow_gap or (scene_valid and not scene.lane_valid):
+            behavior = DriveBehavior.SLOW  # 통신지연·거리근접·차선미인식
+            target_lane = 0
+        else:
+            behavior = DriveBehavior.CRUISE  # 평소 추종
+            target_lane = 0
+
+        command = DriveCommand(stamp=now, behavior=behavior, target_lane=target_lane)
         return command, mode
