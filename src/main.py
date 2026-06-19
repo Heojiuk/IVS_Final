@@ -26,7 +26,7 @@ def build(role, peer_ip=None):
     bus = MessageBus()
     v2v = V2VModule(role, peer_ip)  # 소켓 bind·키 로드가 여기서 일어남 (실패 시 OSError/ValueError)
     modules = [
-        PerceptionModule(),
+        PerceptionModule(role_id),   # 후행은 YOLO 없이 차선 전용 인지 (AI HAT 불필요)
         DecisionModule(role_id),
         MotionModule(role_id),
         v2v,

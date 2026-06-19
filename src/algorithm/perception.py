@@ -11,7 +11,7 @@ import threading
 import time
 
 from core_module.bus import Topics # 버스에 쓰이는 토픽
-from messages import Scene, Detection # 전방 객체 및 차선 정보 (IF-B1)
+from messages import Scene, Detection, Role # 전방 객체 및 차선 정보 (IF-B1), 차량 역할
 
 # 센서 핀 (ICD IF-H2 / HWD) 개발자가 수정가능.
 ULTRASONIC_TRIG, ULTRASONIC_ECHO = 23, 24   # 전방 초음파 (ECHO 5V→3.3V 분압)
@@ -25,7 +25,9 @@ FRONT_CY_MIN = 0.5          # 박스 중심이 화면 아래 절반에 있어야
 
 
 class PerceptionModule:
-    def __init__(self):
+    def __init__(self, role=Role.LEADER):
+        # role=자차 역할 — 후행차(AI HAT 없음)는 YOLO 없이 차선 전용 루프를 돈다
+        self.role = role
         # 세 인지원이 각자 주기로 갱신하는 최신값 (lock 보호)
         self._lock = threading.Lock()
         self._latest = {
@@ -45,12 +47,15 @@ class PerceptionModule:
 
     # ===== 센서 스레드 기동/정지 (라즈베리파이 전용) =====================
     def start(self):
-        """카메라(차선+YOLO)·초음파 스레드를 띄운다. 하드웨어 import는 여기서 지연 로딩.
+        """카메라·초음파 스레드를 띄운다. 하드웨어 import는 여기서 지연 로딩.
+        선행=차선+YOLO(camera_loop), 후행=차선 전용(lane_camera_loop, AI HAT 불필요).
         HEF 경로는 sensing.HEF_PATH 고정값 사용 (명령어 인자 없음)."""
         from algorithm import sensing
         self._stop = threading.Event()
+        cam_loop = (sensing.camera_loop if self.role == Role.LEADER
+                    else sensing.lane_camera_loop)   # 후행은 YOLO 없는 차선 전용 루프
         self._threads = [
-            threading.Thread(target=sensing.camera_loop,
+            threading.Thread(target=cam_loop,
                              args=(self, self._stop), daemon=True),
             threading.Thread(target=sensing.ultrasonic_loop,
                              args=(self, self._stop), daemon=True),

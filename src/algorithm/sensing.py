@@ -176,6 +176,57 @@ def camera_loop(perception, stop_event, hef_path=HEF_PATH, debug_view=False):
             cv2.destroyAllWindows()
 
 
+def lane_camera_loop(perception, stop_event, debug_view=False):
+    """후행차 전용 카메라 루프 — camera_loop 에서 객체(main/YOLO) 부분만 뺀 형태.
+
+    선행과 동일한 멀티스트림 설정(raw=풀 FOV)으로 BEV 캘리를 그대로 공유하되,
+    ObjectDetector(Hailo)를 기동하지 않는다 → AI HAT 없는 후행 Pi에서 동작.
+    objects 는 갱신하지 않으므로(빈 리스트 유지) Scene.front_clear 는 초음파만으로 판정된다.
+
+    debug_view=True 면 두 창을 띄운다 (반드시 메인 스레드에서 호출):
+      'Camera' : lores 프레임 + ego ROI(하단 밴드) + 초음파 거리   (객체 박스 없음)
+      'BEV'    : 마젠타 중앙선 + heading(rad+deg) + curvature HUD
+    """
+    import cv2
+    from picamera2 import Picamera2
+    from algorithm import lane_pipeline
+
+    cam = Picamera2()
+    cfg = cam.create_video_configuration(
+        main={"size": MAIN_SIZE,  "format": "RGB888"},   # lores 의존성상 유지(캡처는 안 함)
+        lores={"size": LORES_SIZE, "format": "YUV420"},
+        raw={"size": RAW_SIZE},                 # 선행과 동일 FOV — BEV 캘리(SRC_POINTS 등) 그대로 적용
+        controls={"FrameRate": FRAME_RATE},
+    )                                            # 카메라 정방향 장착 → 회전(hflip/vflip) 없음
+    cam.configure(cfg)
+    cam.start()
+
+    try:
+        frame_i = 0
+        while not stop_event.is_set():
+            # --- 차선: lores 스트림 (YUV → BGR), 객체인식(main/YOLO)은 수행하지 않음 ---
+            yuv = cam.capture_array("lores")
+            bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
+
+            # 인지는 매 프레임. 디버그 창은 VIEW_RENDER_EVERY 프레임마다 1회만 그림(저전력).
+            if debug_view and frame_i % VIEW_RENDER_EVERY == 0:
+                lane, bev_vis = lane_pipeline.process_view(bgr)
+                perception.update_lane(*lane)
+                _show_debug(cv2, bgr, [], bev_vis,         # objects=[] → 박스 없음
+                            lane_pipeline._L.NEAR_ROI_Y0_FRAC,
+                            perception._latest["dist_front_m"])
+                if (cv2.waitKey(1) & 0xFF) == 27:    # ESC
+                    stop_event.set()
+            else:
+                perception.update_lane(*lane_pipeline.process(bgr))   # 화면만 스킵, 인지는 유지
+            frame_i += 1
+    finally:
+        cam.stop()
+        cam.close()
+        if debug_view:
+            cv2.destroyAllWindows()
+
+
 def _show_debug(cv2, frame_rgb, objects, bev_vis, roi_y0_frac, dist_m=None):
     """디버그 두 창 렌더 (camera_loop debug_view 전용)."""
     from algorithm import object_detection as _d
