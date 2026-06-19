@@ -23,8 +23,8 @@ OFFSET_GAIN  = 1.0
 HEADING_GAIN = 1.0
 
 
-THROTTLE_NORMAL = 49
-THROTTLE_STEER  = 49
+THROTTLE_NORMAL = 52
+THROTTLE_STEER  = 40
 THROTTLE_STOP   = 0
 
 
@@ -162,11 +162,3 @@ class MotionModule:
             self._dc_pwm.ChangeDutyCycle(0)
             GPIO.output(MOTOR_FORWARD,  GPIO.LOW)
             GPIO.output(MOTOR_BACKWARD, GPIO.LOW)
-
-
-
-
-
-
-
-
