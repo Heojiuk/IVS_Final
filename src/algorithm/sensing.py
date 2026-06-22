@@ -44,7 +44,7 @@ class MJPEGStreamer:
     bus 전달 시 /data 엔드포인트로 모든 토픽(Scene/Command/Mode/Link/Peer/EgoState) 제공.
     """
 
-    _DASH = b"""\
+    _DASH = """\
 <!doctype html><html><head><meta charset="utf-8"><title>IVS Debug</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -141,7 +141,7 @@ if(d.ego_state){t('et',d.ego_state.throttle_pwm.toFixed(2));t('es',d.ego_state.s
 }
 setInterval(()=>{document.getElementById('ck').textContent=new Date().toTimeString().slice(0,8);},1000);
 setInterval(poll,200);poll();
-</script></body></html>"""
+</script></body></html>""".encode("utf-8")
 
     def __init__(self, port=VIEW_STREAM_PORT, bus=None, role="follower"):
         self._port   = port
