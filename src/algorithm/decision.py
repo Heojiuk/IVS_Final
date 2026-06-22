@@ -27,6 +27,7 @@ class DecisionModule:
         self._stop_until = 0.0  # 이 시각까지 STOP 유지 (정지 hold — _decide_leader)
         self._stop_signal_count = 0  # stop_signal 연속 감지 카운트 (디바운스)
         self._lane_target = 0  # LANE_CHANGE 목표 차로 (0=비활성, 1·2=활성 — current_lane이 이 값 도달하면 종료)
+        self._leader_lc_prev = False  # 직전 사이클 리더 LANE_CHANGE 상태 (에지 감지용)
 
     def step(self, bus):
         """50ms 주기 — scene·링크·상대상태로 행동·모드 정해 command·mode를 bus에 전송.  bus=메시지버스"""
@@ -134,10 +135,12 @@ class DecisionModule:
         if (not scene_valid) or (link_state == LinkState.LOST) or leader_stop or too_close:
             self._stop_until = now + STOP_HOLD_S
 
-        # ② LANE_CHANGE — 선행차 V2V behavior 추종 (목표는 내 현재 차로의 반대로 토글)
-        leader_lc = peer is not None and peer.behavior == DriveBehavior.LANE_CHANGE
+        # ② LANE_CHANGE — 선행차 V2V behavior 추종 (에지 감지: 리더가 LANE_CHANGE에 진입한 사이클에만 트리거)
+        leader_lc_now = peer is not None and peer.behavior == DriveBehavior.LANE_CHANGE
+        leader_lc_edge = leader_lc_now and not self._leader_lc_prev  # 레벨→에지 변환
+        self._leader_lc_prev = leader_lc_now
         in_action = now < self._stop_until or self._lane_target != 0  # STOP·LC 중 중복 트리거 방지
-        if leader_lc and not in_action and scene_valid:
+        if leader_lc_edge and not in_action and scene_valid and scene.current_lane in (1, 2):
             self._lane_target = 2 if scene.current_lane == 1 else 1
         # ②' 완료 — 인지가 목표 차로 도달 보고 시 즉시 종료
         if self._lane_target != 0 and scene_valid and scene.current_lane == self._lane_target:
