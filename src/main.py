@@ -51,6 +51,8 @@ def main():
                     help="차량 역할 — leader|l 또는 follower|f (대소문자 무관)")  # 기본값 없음 — 역할 누락 방지
     ap.add_argument("-p", "--peer", default=None, metavar="IP",
                     help="상대 차량 IP (주면 IVS_MODE/_IPS 무시 — DHCP 대응)")
+    ap.add_argument("-d", "--debug-view", action="store_true",
+                    help="MJPEG 디버그 스트림 활성화 — http://<IP>:8080/ 에서 확인")
     args = ap.parse_args()
 
     # ── 주행 시작 전 방어: 조립·소켓 bind·키 로드를 시도하고, 실패하면 raw 트레이스백 대신 명확히 중단 ──
@@ -73,7 +75,7 @@ def main():
     v2v.start(bus)  # V2V RX 스레드 기동
     for m in modules:                       # 인지 센서 스레드 기동 (카메라+초음파, 실차 전용)
         if isinstance(m, PerceptionModule):
-            m.start()
+            m.start(debug_view=args.debug_view)
             break
 
     signal.signal(signal.SIGINT, lambda *_: sched.stop())

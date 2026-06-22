@@ -46,17 +46,19 @@ class PerceptionModule:
         self._threads = []
 
     # ===== 센서 스레드 기동/정지 (라즈베리파이 전용) =====================
-    def start(self):
+    def start(self, debug_view=False):
         """카메라·초음파 스레드를 띄운다. 하드웨어 import는 여기서 지연 로딩.
         선행=차선+YOLO(camera_loop), 후행=차선 전용(lane_camera_loop, AI HAT 불필요).
-        HEF 경로는 sensing.HEF_PATH 고정값 사용 (명령어 인자 없음)."""
+        HEF 경로는 sensing.HEF_PATH 고정값 사용 (명령어 인자 없음).
+        debug_view=True 면 MJPEG 스트리밍 활성화 (http://<IP>:8080/)."""
         from algorithm import sensing
         self._stop = threading.Event()
         cam_loop = (sensing.camera_loop if self.role == Role.LEADER
                     else sensing.lane_camera_loop)   # 후행은 YOLO 없는 차선 전용 루프
         self._threads = [
             threading.Thread(target=cam_loop,
-                             args=(self, self._stop), daemon=True),
+                             args=(self, self._stop),
+                             kwargs={"debug_view": debug_view}, daemon=True),
             threading.Thread(target=sensing.ultrasonic_loop,
                              args=(self, self._stop), daemon=True),
         ]
