@@ -38,17 +38,118 @@ ULTRA_PERIOD_S         = 0.05       # 20Hz
 
 
 class MJPEGStreamer:
-    """cv2.imshow() 대체 — MJPEG HTTP 스트림으로 저전력 원격 디버그.
+    """cv2.imshow() 대체 — MJPEG + 데이터 대시보드 HTTP 서버 (저전력 원격 디버그).
 
-    X11 합성 없이 JPEG 인코딩만 수행해 RPi 전력 스파이크를 제거한다.
-    브라우저에서 http://<RPi-IP>:VIEW_STREAM_PORT/ 로 접속.
+    X11 합성 없이 JPEG 인코딩만 수행. 브라우저에서 http://<RPi-IP>:VIEW_STREAM_PORT/ 접속.
+    bus 전달 시 /data 엔드포인트로 모든 토픽(Scene/Command/Mode/Link/Peer/EgoState) 제공.
     """
 
-    def __init__(self, port=VIEW_STREAM_PORT):
+    _DASH = b"""\
+<!doctype html><html><head><meta charset="utf-8"><title>IVS Debug</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d0d;color:#e0e0e0;font-family:'Courier New',monospace;font-size:13px;display:flex;flex-direction:column;height:100vh}
+.hdr{background:#111;padding:6px 14px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #1e1e1e;flex-shrink:0}
+.hdr h1{font-size:13px;color:#4fc3f7;letter-spacing:3px}.role{background:#1a2630;padding:1px 8px;border-radius:2px;color:#80cbc4;font-size:11px}
+.dot{width:7px;height:7px;border-radius:50%;background:#333;display:inline-block}.dot.ok{background:#69f0ae}.dot.err{background:#f44336}
+.clk{margin-left:auto;color:#333;font-size:11px}
+.body{display:flex;flex:1;overflow:hidden}
+.vp{flex-shrink:0;padding:8px;display:flex;flex-direction:column;gap:4px;border-right:1px solid #1a1a1a}
+.vp img{display:block;max-width:700px;width:auto;height:auto;border:1px solid #1e1e1e;background:#080808}
+.vlbl{font-size:10px;color:#333;text-align:center}
+.dp{flex:1;overflow-y:auto;padding:8px;display:grid;grid-template-columns:1fr 1fr;gap:7px;align-content:start}
+.card{background:#141414;border:1px solid #1e1e1e;border-radius:3px;padding:9px}
+.ct{font-size:10px;color:#444;text-transform:uppercase;letter-spacing:1px;margin-bottom:7px}
+.bdg{display:inline-block;padding:3px 10px;border-radius:2px;font-size:14px;font-weight:bold;letter-spacing:1px}
+.bCRUISE{background:#1b5e20;color:#69f0ae}.bLANE_CHANGE{background:#7f4c00;color:#ffcc02}
+.bSTOP{background:#7f0000;color:#ff5252}.bSLOW{background:#7f3000;color:#ffab40}.bX{background:#1c1c1c;color:#444}
+.mNORMAL{background:#1b5e20;color:#69f0ae}.mDEGRADED{background:#7f3000;color:#ffab40}.mESTOP{background:#7f0000;color:#ff5252}.mX{background:#1c1c1c;color:#444}
+.row{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid #1a1a1a}.row:last-child{border:none}
+.k{color:#444}.v{color:#b0bec5;font-weight:bold}.vok{color:#69f0ae}.vwarn{color:#ffab40}.verr{color:#ff5252}
+.big{font-size:26px;font-weight:bold;color:#4fc3f7}
+.gbg{background:#0a0a0a;height:5px;border-radius:2px;margin-top:4px}
+.gf{height:100%;border-radius:2px;transition:width .1s,background .1s}
+.s2{grid-column:1/-1}
+</style></head><body>
+<div class="hdr"><h1>IVS DEBUG</h1><span class="role" id="ri">–</span><span class="dot" id="dot"></span><span class="clk" id="ck"></span></div>
+<div class="body">
+<div class="vp"><img id="si" src="/stream"><div class="vlbl">Camera &nbsp;|&nbsp; BEV</div></div>
+<div class="dp">
+<div class="card"><div class="ct">Behavior</div><span class="bdg bX" id="beh">–</span><div style="margin-top:5px;font-size:11px;color:#555" id="tgt"></div></div>
+<div class="card"><div class="ct">Mode</div><span class="bdg mX" id="mod">–</span><div style="margin-top:5px;font-size:11px;color:#555" id="cau"></div></div>
+<div class="card s2"><div class="ct">Lane</div>
+<div style="display:flex;gap:20px;align-items:flex-start">
+<div><div style="font-size:10px;color:#444">lane</div><div class="big" id="ln">–</div></div>
+<div style="flex:1">
+<div class="row"><span class="k">valid</span><span class="v" id="lv">–</span></div>
+<div class="row"><span class="k">offset</span><span class="v" id="lo">–</span></div>
+<div class="row"><span class="k">heading</span><span class="v" id="lh">–</span></div>
+<div class="row"><span class="k">curvature</span><span class="v" id="lc">–</span></div>
+</div></div></div>
+<div class="card"><div class="ct">Distance</div><div class="big" id="dv">–</div><div class="gbg"><div class="gf" id="dg" style="width:0%"></div></div><div style="margin-top:4px;font-size:11px" id="fc">–</div></div>
+<div class="card"><div class="ct">V2V Link</div>
+<div class="row"><span class="k">state</span><span class="v" id="ls">–</span></div>
+<div class="row"><span class="k">age</span><span class="v" id="la">–</span></div>
+<div class="row"><span class="k">seq</span><span class="v" id="lq">–</span></div>
+</div>
+<div class="card s2"><div class="ct">V2V Peer</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<div class="row" style="flex:1;min-width:120px"><span class="k">behavior</span><span class="v" id="pb">–</span></div>
+<div class="row" style="flex:1;min-width:80px"><span class="k">lane</span><span class="v" id="pl">–</span></div>
+<div class="row" style="flex:1;min-width:100px"><span class="k">throttle</span><span class="v" id="pt">–</span></div>
+<div class="row" style="flex:1;min-width:100px"><span class="k">steer</span><span class="v" id="ps">–</span></div>
+</div></div>
+<div class="card s2"><div class="ct">Ego Output (Motion)</div>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<div class="row" style="flex:1;min-width:100px"><span class="k">throttle</span><span class="v" id="et">–</span></div>
+<div class="row" style="flex:1;min-width:100px"><span class="k">steer</span><span class="v" id="es">–</span></div>
+<div class="row" style="flex:1;min-width:120px"><span class="k">behavior</span><span class="v" id="eb">–</span></div>
+</div></div>
+</div></div>
+<script>
+const BC={CRUISE:'bCRUISE',LANE_CHANGE:'bLANE_CHANGE',STOP:'bSTOP',SLOW:'bSLOW'};
+const MC={NORMAL:'mNORMAL',DEGRADED:'mDEGRADED',ESTOP:'mESTOP'};
+const LC={ALIVE:'vok',STALE:'vwarn',LOST:'verr'};
+function t(id,v){const e=document.getElementById(id);if(e)e.textContent=v!=null?v:'–';}
+function bc(id,v,map){const e=document.getElementById(id);if(!e)return;e.textContent=v||'–';const c=e.className.replace(/\b[bm]\w+/g,'').trim();e.className=c+' '+(map[v]||Object.values(map)[0].replace(/\w+$/,'X'));}
+async function poll(){
+try{
+const d=await fetch('/data').then(r=>r.json());
+document.getElementById('dot').className='dot ok';
+if(d.role)t('ri',d.role.toUpperCase());
+if(d.command){bc('beh',d.command.behavior,BC);t('tgt',d.command.target_lane?'→ lane '+d.command.target_lane:'');}
+if(d.mode){bc('mod',d.mode.mode,MC);t('cau',d.mode.cause!=='NONE'?d.mode.cause:'');}
+if(d.scene){
+const s=d.scene;
+t('ln',s.current_lane||'–');
+const lv=document.getElementById('lv');if(lv){lv.textContent=s.lane_valid?'YES':'NO';lv.className='v '+(s.lane_valid?'vok':'verr');}
+t('lo',s.lane_offset_cm!=null?s.lane_offset_cm.toFixed(1)+' cm':'–');
+t('lh',s.lane_heading_rad!=null?(s.lane_heading_rad*57.296).toFixed(1)+'°':'–');
+t('lc',s.lane_curvature_1pm!=null?s.lane_curvature_1pm.toFixed(3)+' /m':'–');
+const dc=s.dist_front_cm,dg=document.getElementById('dg');
+if(dc!=null){t('dv',dc.toFixed(0)+' cm');const p=Math.min(100,dc/400*100);dg.style.width=p+'%';dg.style.background=dc<10?'#f44336':dc<20?'#ff9800':'#4fc3f7';}
+else{t('dv','None');dg.style.width='0%';}
+const fc=document.getElementById('fc');
+if(s.stop_signal){fc.textContent='⚠ STOP SIGNAL';fc.style.color='#ffab40';}
+else if(!s.front_clear){fc.textContent='✘ blocked';fc.style.color='#ff5252';}
+else{fc.textContent='✔ clear';fc.style.color='#69f0ae';}
+}
+if(d.link){const ls=document.getElementById('ls');ls.textContent=d.link.state;ls.className='v '+(LC[d.link.state]||'');t('la',d.link.age_rx_ms!=null?d.link.age_rx_ms.toFixed(0)+' ms':'–');t('lq',d.link.last_seq);}
+if(d.peer){t('pb',d.peer.behavior);t('pl',d.peer.lane);t('pt',d.peer.throttle_pwm!=null?d.peer.throttle_pwm.toFixed(2):'–');t('ps',d.peer.steer_pwm!=null?d.peer.steer_pwm.toFixed(2):'–');}
+if(d.ego_state){t('et',d.ego_state.throttle_pwm.toFixed(2));t('es',d.ego_state.steer_pwm.toFixed(2));t('eb',d.ego_state.behavior);}
+}catch(e){document.getElementById('dot').className='dot err';}
+}
+setInterval(()=>{document.getElementById('ck').textContent=new Date().toTimeString().slice(0,8);},1000);
+setInterval(poll,200);poll();
+</script></body></html>"""
+
+    def __init__(self, port=VIEW_STREAM_PORT, bus=None, role="follower"):
         self._port   = port
         self._lock   = threading.Lock()
         self._jpeg   = None
         self._server = None
+        self._bus    = bus
+        self._role   = role
 
     def push(self, cv2_mod, frame_bgr):
         """BGR 프레임 → JPEG 인코딩 → 버퍼 갱신. 렌더 스레드에서 호출."""
@@ -63,6 +164,63 @@ class MJPEGStreamer:
         with self._lock:
             return self._jpeg
 
+    def _data_json(self):
+        """버스 전 토픽을 읽어 JSON bytes 반환. bus 미연결 시 role만 포함."""
+        import json
+        out = {"role": self._role}
+        bus = self._bus
+        if bus is None:
+            return json.dumps(out).encode()
+        try:
+            from core_module.bus import Topics
+            from messages import DriveBehavior, Mode, ModeCause, LinkState, Role as _Role
+
+            scene = bus.read(Topics.SCENE)
+            if scene:
+                out["scene"] = {
+                    "lane_valid":        scene.lane_valid,
+                    "current_lane":      scene.current_lane,
+                    "lane_offset_cm":    round(scene.lane_offset_cm, 2),
+                    "lane_heading_rad":  round(scene.lane_heading_rad, 4),
+                    "lane_curvature_1pm": round(scene.lane_curvature_1pm, 4),
+                    "front_clear":       scene.front_clear,
+                    "dist_front_cm":     round(scene.dist_front_cm, 1) if scene.dist_front_cm is not None else None,
+                    "stop_signal":       scene.stop_signal,
+                }
+
+            cmd = bus.read(Topics.COMMAND)
+            if cmd:
+                out["command"] = {"behavior": DriveBehavior(cmd.behavior).name, "target_lane": cmd.target_lane}
+
+            mode = bus.read(Topics.MODE)
+            if mode:
+                out["mode"] = {"mode": Mode(mode.mode).name, "cause": ModeCause(mode.cause).name}
+
+            ego = bus.read(Topics.EGO_STATE)
+            if ego:
+                out["ego_state"] = {
+                    "throttle_pwm": round(ego.throttle_pwm, 3),
+                    "steer_pwm":    round(ego.steer_pwm, 3),
+                    "behavior":     DriveBehavior(ego.behavior).name,
+                }
+
+            link = bus.read(Topics.LINK_STATUS)
+            if link:
+                out["link"] = {"state": LinkState(link.state).name, "age_rx_ms": round(link.age_rx, 1), "last_seq": link.last_seq}
+
+            peer_topic = Topics.LEADER_STATE if self._role == "follower" else Topics.FOLLOWER_STATE
+            peer = bus.read(peer_topic)
+            if peer:
+                out["peer"] = {
+                    "behavior":     DriveBehavior(peer.behavior).name,
+                    "lane":         peer.lane,
+                    "throttle_pwm": round(peer.throttle_pwm, 3),
+                    "steer_pwm":    round(peer.steer_pwm, 3),
+                }
+        except Exception:
+            pass
+        return json.dumps(out).encode()
+
     def start(self):
         import socket
         from http.server import BaseHTTPRequestHandler
@@ -71,27 +229,19 @@ class MJPEGStreamer:
         streamer = self
 
         class _H(BaseHTTPRequestHandler):
-            def log_message(self, *_): pass  # 콘솔 오염 방지
+            def log_message(self, *_): pass
 
             def do_GET(self):
                 if self.path == "/":
-                    body = (
-                        b"<html><head><title>IVS Debug</title>"
-                        b"<style>body{background:#111;margin:0}"
-                        b"img{width:100%;display:block}</style></head>"
-                        b"<body><img src='/stream'></body></html>"
-                    )
+                    body = streamer._DASH
                     self.send_response(200)
-                    self.send_header("Content-Type", "text/html")
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
                     self.send_header("Content-Length", len(body))
                     self.end_headers()
                     self.wfile.write(body)
                 elif self.path == "/stream":
                     self.send_response(200)
-                    self.send_header(
-                        "Content-Type",
-                        "multipart/x-mixed-replace; boundary=frame",
-                    )
+                    self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
                     self.end_headers()
                     try:
                         while True:
@@ -102,9 +252,17 @@ class MJPEGStreamer:
                                 self.wfile.write(jpeg)
                                 self.wfile.write(b"\r\n")
                                 self.wfile.flush()
-                            time.sleep(0.15)  # 클라이언트당 최대 ~7fps
+                            time.sleep(0.15)
                     except (BrokenPipeError, ConnectionResetError):
                         pass
+                elif self.path == "/data":
+                    body = streamer._data_json()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", len(body))
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self.wfile.write(body)
 
         ThreadingTCPServer.allow_reuse_address = True
         self._server = ThreadingTCPServer(("0.0.0.0", self._port), _H)
@@ -209,18 +367,17 @@ def ultrasonic_loop(perception, stop_event):
         time.sleep(ULTRA_PERIOD_S)
 
 
-def camera_loop(perception, stop_event, hef_path=HEF_PATH, debug_view=False):
+def camera_loop(perception, stop_event, hef_path=HEF_PATH, debug_view=False, bus=None, role="leader"):
     """멀티스트림 카메라: main(RGB)→YOLO, lores(YUV)→차선. 한 루프에서 둘 다 갱신.
 
-    debug_view=True 면 두 창을 띄운다 (반드시 메인 스레드에서 호출 — imshow 안정성):
-      'Camera' : main 프레임 + 객체 박스 + ego ROI(하단 밴드)
-      'BEV'    : 마젠타 중앙선 + heading(rad+deg) + curvature HUD
+    debug_view=True 면 MJPEG 스트리밍 대시보드를 활성화한다 (http://<IP>:8080/).
+    bus 를 전달하면 /data 로 전 토픽(Scene·Command·Mode·Link 등)이 노출된다.
     """
     import cv2
     from picamera2 import Picamera2
     from algorithm import lane_pipeline
 
-    streamer = MJPEGStreamer() if debug_view else None
+    streamer = MJPEGStreamer(bus=bus, role=role) if debug_view else None
     if streamer:
         streamer.start()
 
@@ -269,22 +426,19 @@ def camera_loop(perception, stop_event, hef_path=HEF_PATH, debug_view=False):
             cv2.destroyAllWindows()
 
 
-def lane_camera_loop(perception, stop_event, debug_view=False):
+def lane_camera_loop(perception, stop_event, debug_view=False, bus=None, role="follower"):
     """후행차 전용 카메라 루프 — camera_loop 에서 객체(main/YOLO) 부분만 뺀 형태.
 
     선행과 동일한 멀티스트림 설정(raw=풀 FOV)으로 BEV 캘리를 그대로 공유하되,
     ObjectDetector(Hailo)를 기동하지 않는다 → AI HAT 없는 후행 Pi에서 동작.
-    objects 는 갱신하지 않으므로(빈 리스트 유지) Scene.front_clear 는 초음파만으로 판정된다.
-
-    debug_view=True 면 두 창을 띄운다 (반드시 메인 스레드에서 호출):
-      'Camera' : lores 프레임 + ego ROI(하단 밴드) + 초음파 거리   (객체 박스 없음)
-      'BEV'    : 마젠타 중앙선 + heading(rad+deg) + curvature HUD
+    debug_view=True 면 MJPEG 스트리밍 대시보드를 활성화한다 (http://<IP>:8080/).
+    bus 를 전달하면 /data 로 전 토픽(Scene·Command·Mode·Link 등)이 노출된다.
     """
     import cv2
     from picamera2 import Picamera2
     from algorithm import lane_pipeline
 
-    streamer = MJPEGStreamer() if debug_view else None
+    streamer = MJPEGStreamer(bus=bus, role=role) if debug_view else None
     if streamer:
         streamer.start()
 

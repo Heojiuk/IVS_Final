@@ -75,7 +75,7 @@ def main():
     v2v.start(bus)  # V2V RX 스레드 기동
     for m in modules:                       # 인지 센서 스레드 기동 (카메라+초음파, 실차 전용)
         if isinstance(m, PerceptionModule):
-            m.start(debug_view=args.debug_view)
+            m.start(debug_view=args.debug_view, bus=bus)
             break
 
     signal.signal(signal.SIGINT, lambda *_: sched.stop())
