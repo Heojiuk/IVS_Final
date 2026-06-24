@@ -268,8 +268,12 @@ setInterval(poll,200);poll();
         self._server = ThreadingTCPServer(("0.0.0.0", self._port), _H)
         threading.Thread(target=self._server.serve_forever, daemon=True).start()
 
+        # gethostbyname(hostname) 은 127.0.1.1(loopback) 을 반환하는 Pi 가 많음.
+        # 실제 LAN IP 는 dummy UDP connect 로 구한다 (패킷 안 보냄).
         try:
-            ip = socket.gethostbyname(socket.gethostname())
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as _s:
+                _s.connect(("8.8.8.8", 80))
+                ip = _s.getsockname()[0]
         except Exception:
             ip = "0.0.0.0"
         print(f"[debug-stream] http://{ip}:{self._port}/  (Ctrl+C 종료)")
@@ -406,7 +410,8 @@ def camera_loop(perception, stop_event, hef_path=HEF_PATH, debug_view=False, bus
 
                 # 인지는 매 프레임. 디버그 창은 VIEW_RENDER_EVERY 프레임마다 1회만 그림(저전력).
                 if debug_view and frame_i % VIEW_RENDER_EVERY == 0:
-                    lane, bev_vis = lane_pipeline.process_view(bgr)
+                    *_raw, bev_vis = lane_pipeline.process_view(bgr)
+                    lane = _raw[0] if len(_raw) == 1 else tuple(_raw)
                     perception.update_lane(*lane)
                     _show_debug(cv2, frame_rgb, objects, bev_vis,
                                 lane_pipeline._L.NEAR_ROI_Y0_FRAC,
@@ -461,7 +466,8 @@ def lane_camera_loop(perception, stop_event, debug_view=False, bus=None, role="f
 
             # 인지는 매 프레임. 디버그 창은 VIEW_RENDER_EVERY 프레임마다 1회만 그림(저전력).
             if debug_view and frame_i % VIEW_RENDER_EVERY == 0:
-                lane, bev_vis = lane_pipeline.process_view(bgr)
+                *_raw, bev_vis = lane_pipeline.process_view(bgr)
+                lane = _raw[0] if len(_raw) == 1 else tuple(_raw)
                 perception.update_lane(*lane)
                 _show_debug(cv2, bgr, [], bev_vis,         # objects=[] → 박스 없음
                             lane_pipeline._L.NEAR_ROI_Y0_FRAC,
