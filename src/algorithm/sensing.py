@@ -410,13 +410,17 @@ def camera_loop(perception, stop_event, hef_path=HEF_PATH, debug_view=False, bus
 
                 # 인지는 매 프레임. 디버그 창은 VIEW_RENDER_EVERY 프레임마다 1회만 그림(저전력).
                 if debug_view and frame_i % VIEW_RENDER_EVERY == 0:
-                    *_raw, bev_vis = lane_pipeline.process_view(bgr)
-                    lane = _raw[0] if len(_raw) == 1 else tuple(_raw)
-                    perception.update_lane(*lane)
-                    _show_debug(cv2, frame_rgb, objects, bev_vis,
-                                lane_pipeline._L.NEAR_ROI_Y0_FRAC,
-                                perception._latest["dist_front_m"],
-                                streamer=streamer)
+                    try:
+                        *_raw, bev_vis = lane_pipeline.process_view(bgr)
+                        lane = _raw[0] if len(_raw) == 1 else tuple(_raw)
+                        perception.update_lane(*lane)
+                        _show_debug(cv2, frame_rgb, objects, bev_vis,
+                                    lane_pipeline._L.NEAR_ROI_Y0_FRAC,
+                                    perception._latest["dist_front_m"],
+                                    streamer=streamer)
+                    except Exception as _e:
+                        print(f"[debug] render error: {_e}", flush=True)
+                        perception.update_lane(*lane_pipeline.process(bgr))
                     if streamer is None and (cv2.waitKey(1) & 0xFF) == 27:   # ESC (로컬창 전용)
                         stop_event.set()
                 else:
@@ -466,13 +470,17 @@ def lane_camera_loop(perception, stop_event, debug_view=False, bus=None, role="f
 
             # 인지는 매 프레임. 디버그 창은 VIEW_RENDER_EVERY 프레임마다 1회만 그림(저전력).
             if debug_view and frame_i % VIEW_RENDER_EVERY == 0:
-                *_raw, bev_vis = lane_pipeline.process_view(bgr)
-                lane = _raw[0] if len(_raw) == 1 else tuple(_raw)
-                perception.update_lane(*lane)
-                _show_debug(cv2, bgr, [], bev_vis,         # objects=[] → 박스 없음
-                            lane_pipeline._L.NEAR_ROI_Y0_FRAC,
-                            perception._latest["dist_front_m"],
-                            streamer=streamer)
+                try:
+                    *_raw, bev_vis = lane_pipeline.process_view(bgr)
+                    lane = _raw[0] if len(_raw) == 1 else tuple(_raw)
+                    perception.update_lane(*lane)
+                    _show_debug(cv2, bgr, [], bev_vis,         # objects=[] → 박스 없음
+                                lane_pipeline._L.NEAR_ROI_Y0_FRAC,
+                                perception._latest["dist_front_m"],
+                                streamer=streamer)
+                except Exception as _e:
+                    print(f"[debug] render error: {_e}", flush=True)
+                    perception.update_lane(*lane_pipeline.process(bgr))
                 if streamer is None and (cv2.waitKey(1) & 0xFF) == 27:   # ESC (로컬창 전용)
                     stop_event.set()
             else:
