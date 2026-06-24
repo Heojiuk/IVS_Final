@@ -25,7 +25,8 @@ THROTTLE_STOP   = 0
 STEER_THRESHOLD   = 10 / 40
 LANE_CHANGE_STEER = 0.7
 
-TARGET_DIST = 10.0  # minimum safe distance (cm)
+TARGET_DIST = 10.0
+KP_DIST     = 0.5
 
 
 class MotionModule:
@@ -91,7 +92,6 @@ class MotionModule:
                 else:
                     steer_pwm = self._calc_steer(scene)
 
-                # base speed from steer angle
                 if abs(steer_pwm) >= STEER_THRESHOLD:
                     base_throttle = THROTTLE_NORMAL
                 else:
@@ -99,15 +99,11 @@ class MotionModule:
 
                 if self.role == Role.FOLLOWER and leader is not None:
                     if scene is not None and scene.dist_front_cm is not None:
-                        if scene.dist_front_cm < TARGET_DIST:
-                            # too close → slow down
-                            throttle_pwm = THROTTLE_STEER
-                        else:
-                            # safe distance → full speed
-                            throttle_pwm = THROTTLE_NORMAL
+                        dist_err = scene.dist_front_cm - TARGET_DIST
+                        throttle_pwm = max(0, min(100,
+                            base_throttle + KP_DIST * dist_err))
                     else:
-                        # ultrasonic lost → full speed
-                        throttle_pwm = THROTTLE_NORMAL
+                        throttle_pwm = base_throttle
                 else:
                     throttle_pwm = base_throttle
 
