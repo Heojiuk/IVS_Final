@@ -18,11 +18,11 @@ MAIN_SIZE  = (1920, 1080)   # YOLO 용 (detect.py CAMERA_W/H 와 일치)
 LORES_SIZE = (640, 360)     # 차선 용 (v2.3 PREVIEW_SIZE 와 일치)
 RAW_SIZE   = (2304, 1296)   # ★ imx708 풀 FOV 비닝 모드 — 차선 BEV 캘리가 이 화각 기준.
                             #   raw 미지정 시 picamera2가 다른 센서모드(다른 FOV) 선택 → BEV 깨짐
-FRAME_RATE = 20            # 20Hz 제어 루프와 정합 (30→20, 캡처/추론/렌더 부하·전력↓)
+FRAME_RATE = 15            # 저전압 방지: 20→15Hz, 추론·렌더 스파이크 빈도↓ (스케줄러 20Hz와 독립)
 
 # 디버그 창을 매 프레임 그리면 imshow/X 합성 부하로 저전압(undervoltage)→멈춤이 날 수 있다.
 # → 인지는 매 프레임 돌리되, 화면만 N프레임마다 1회 그려 전력 스파이크를 줄인다 (debug_view 전용).
-VIEW_RENDER_EVERY   = 4
+VIEW_RENDER_EVERY   = 6
 VIEW_CAM_SIZE       = (480, 270)  # 디버그 프레임 크기 (작을수록 JPEG 인코딩·전송 전력↓)
 VIEW_BEV_SCALE      = 0.6         # BEV 축소 배율
 VIEW_STREAM_PORT    = 8080        # MJPEG 스트리밍 포트 (debug_view 전용)
@@ -44,7 +44,7 @@ class MJPEGStreamer:
     bus 전달 시 /data 엔드포인트로 모든 토픽(Scene/Command/Mode/Link/Peer/EgoState) 제공.
     """
 
-    _DASH = """\
+    _DASH = r"""
 <!doctype html><html><head><meta charset="utf-8"><title>IVS Debug</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
